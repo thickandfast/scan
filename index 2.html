@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Prisscanner – Strekkode til pris</title>
+  <meta name="description" content="Skann EAN-strekkode og finn prisen i norske nettbutikker" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;Prisscanner&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;theme_color&quot;:&quot;%230a0a0f&quot;}" />
+
+  <!-- ZXing for Safari (no BarcodeDetector support) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/zxing-js/0.21.3/zxing.min.js"
+    integrity="sha512-uODHzBMzPiKhXaKqOWNdFmY5HgNiSj0Z1j7yv7RLKO8w1A9MQK9Pom0yWXHqCQr/3BdFqh8B67K4IU9Hm3yA=="
+    crossorigin="anonymous"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #111118;
+      --surface2: #1a1a24;
+      --border: #2a2a3a;
+      --accent: #00ff88;
+      --accent2: #0099ff;
+      --muted: #5a5a7a;
+      --text: #e8e8f0;
+      --danger: #ff3366;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      overscroll-behavior: none;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 16px 48px;
+      min-height: 100%;
+    }
+
+    /* ── Animations ── */
+    @keyframes scanline {
+      0%   { top: 8%; opacity: 0; }
+      5%   { opacity: 1; }
+      95%  { opacity: 1; }
+      100% { top: 92%; opacity: 0; }
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(0,255,136,.35); }
+      50%      { box-shadow: 0 0 0 10px rgba(0,255,136,0); }
+    }
+    @keyframes flashGreen {
+      0%,100% { background: transparent; }
+      30%     { background: rgba(0,255,136,.25); }
+    }
+
+    .fade-up { animation: fadeUp .4s ease both; }
+
+    /* ── Layout ── */
+    .wrap {
+      width: 100%;
+      max-width: 480px;
+    }
+
+    /* ── Header ── */
+    header {
+      width: 100%;
+      max-width: 480px;
+      padding: 24px 0 18px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-box {
+      width: 38px; height: 38px;
+      background: var(--accent);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; color: #000; font-weight: 900; flex-shrink: 0;
+    }
+    .logo-text { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 17px; letter-spacing: -.4px; }
+    .logo-sub  { font-size: 9px; color: var(--muted); letter-spacing: 2.5px; margin-top: 2px; }
+    .status-pill {
+      margin-left: auto;
+      font-size: 9px; letter-spacing: 1.5px;
+      padding: 4px 10px; border-radius: 20px;
+      border: 1px solid;
+    }
+    .status-ok   { color: var(--accent); border-color: rgba(0,255,136,.3); }
+    .status-warn { color: var(--muted);  border-color: var(--border); }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px 20px;
+      margin-bottom: 14px;
+    }
+    .card-sm { padding: 18px 20px; }
+
+    /* ── Buttons ── */
+    .btn {
+      width: 100%; padding: 15px;
+      border: none; border-radius: 10px;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700; font-size: 14px;
+      letter-spacing: .4px; cursor: pointer;
+      transition: transform .15s, filter .15s;
+      -webkit-appearance: none;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn-primary { background: var(--accent); color: #000; animation: pulse 2.4s ease infinite; }
+    .btn-secondary {
+      background: transparent; color: var(--muted);
+      border: 1px solid var(--border);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px; margin-top: 10px;
+    }
+    .btn-ghost {
+      background: transparent; color: var(--muted);
+      border: none; font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; margin-top: 8px;
+    }
+
+    /* ── Idle features grid ── */
+    .feat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .feat-item {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 12px;
+    }
+    .feat-icon { font-size: 22px; margin-bottom: 6px; }
+    .feat-label { font-size: 11px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+    .feat-desc  { font-size: 10px; color: var(--muted); line-height: 1.5; }
+
+    /* ── Camera viewport ── */
+    #cam-wrap {
+      position: relative;
+      border-radius: 16px; overflow: hidden;
+      background: #000; aspect-ratio: 4/3;
+      margin-bottom: 14px;
+    }
+    #video {
+      width: 100%; height: 100%;
+      object-fit: cover; display: block;
+    }
+    .cam-overlay {
+      position: absolute; inset: 0;
+      background: linear-gradient(to bottom,
+        rgba(0,0,0,.35) 0%, transparent 28%,
+        transparent 72%, rgba(0,0,0,.35) 100%);
+      pointer-events: none;
+    }
+    .scan-frame {
+      position: absolute;
+      top: 18%; left: 8%; width: 84%; height: 64%;
+      pointer-events: none;
+    }
+    .corner {
+      position: absolute; width: 22px; height: 22px;
+    }
+    .c-tl { top:0; left:0;  border-top: 2.5px solid var(--accent); border-left: 2.5px solid var(--accent); }
+    .c-tr { top:0; right:0; border-top: 2.5px solid var(--accent); border-right: 2.5px solid var(--accent); }
+    .c-bl { bottom:0; left:0;  border-bottom: 2.5px solid var(--accent); border-left: 2.5px solid var(--accent); }
+    .c-br { bottom:0; right:0; border-bottom: 2.5px solid var(--accent); border-right: 2.5px solid var(--accent); }
+    .scan-beam {
+      position: absolute; left: 2%; width: 96%; height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      box-shadow: 0 0 10px var(--accent);
+      animation: scanline 2.2s ease-in-out infinite;
+    }
+    .cam-hint {
+      position: absolute; bottom: 14px; left: 0; right: 0;
+      text-align: center; font-size: 10px;
+      color: rgba(255,255,255,.6); letter-spacing: 1.8px;
+    }
+    #cam-flash {
+      position: absolute; inset: 0;
+      pointer-events: none; border-radius: 16px;
+      animation: none;
+    }
+    #cam-flash.flash { animation: flashGreen .4s ease; }
+
+    /* ── Input ── */
+    .text-input {
+      width: 100%; padding: 14px 16px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 16px; outline: none;
+      letter-spacing: 1px; margin-bottom: 12px;
+      -webkit-appearance: none;
+    }
+    .text-input:focus { border-color: var(--accent); }
+
+    /* ── Spinner ── */
+    .spinner {
+      width: 44px; height: 44px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+      margin: 0 auto 20px;
+    }
+
+    /* ── Result ── */
+    .result-header { display: flex; gap: 14px; align-items: flex-start; }
+    .result-emoji {
+      width: 58px; height: 58px; flex-shrink: 0;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 30px;
+    }
+    .result-name {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700; font-size: 17px;
+      line-height: 1.3; margin-bottom: 4px;
+    }
+    .result-brand { font-size: 11px; color: var(--accent2); letter-spacing: .4px; margin-bottom: 6px; }
+    .tag {
+      display: inline-block;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px; padding: 2px 8px;
+      font-size: 10px; color: var(--muted);
+    }
+    .result-desc {
+      margin-top: 14px; padding: 12px 14px;
+      background: var(--surface2); border-radius: 8px;
+      font-size: 12px; color: var(--muted); line-height: 1.7;
+    }
+    .result-meta {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 14px; padding-top: 12px;
+      border-top: 1px solid var(--border);
+      font-size: 10px;
+    }
+    .confidence-high   { color: var(--accent); }
+    .confidence-medium { color: var(--accent2); }
+    .confidence-low    { color: var(--muted); }
+    .accent-bar {
+      position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 16px 16px 0 0;
+    }
+
+    /* ── OFF info row ── */
+    .off-row {
+      display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;
+    }
+    .off-badge {
+      padding: 4px 10px;
+      background: rgba(0,153,255,.1);
+      border: 1px solid rgba(0,153,255,.3);
+      border-radius: 20px; font-size: 10px; color: var(--accent2);
+    }
+
+    /* ── Search buttons ── */
+    .search-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .search-btn {
+      padding: 14px 10px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 10px; color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; cursor: pointer;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 6px;
+      transition: transform .15s, border-color .15s;
+      -webkit-appearance: none;
+    }
+    .search-btn:hover { transform: translateY(-2px); border-color: var(--accent); }
+    .search-btn:active { transform: scale(.96); }
+    .search-btn span:first-child { font-size: 24px; }
+    .search-btn span:last-child  { color: var(--muted); letter-spacing: .4px; }
+
+    .search-query {
+      padding: 10px 14px;
+      background: var(--surface2); border-radius: 8px;
+      font-size: 13px; color: var(--accent);
+      word-break: break-all; margin-top: 8px; letter-spacing: .3px;
+    }
+
+    /* ── Error banner ── */
+    .err-banner {
+      padding: 11px 14px; border-radius: 8px; margin-bottom: 12px;
+      background: rgba(255,51,102,.08);
+      border: 1px solid rgba(255,51,102,.3);
+      font-size: 11px; color: var(--danger); line-height: 1.6;
+    }
+
+    /* ── Section labels ── */
+    .section-label {
+      font-size: 9px; letter-spacing: 2.5px; color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    /* ── Hidden ── */
+    .hidden { display: none !important; }
+
+    /* ── iOS safe area ── */
+    @supports (padding-bottom: env(safe-area-inset-bottom)) {
+      body { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── HEADER ── -->
+  <header>
+    <div class="logo-box">◈</div>
+    <div>
+      <div class="logo-text">PRISSCANNER</div>
+      <div class="logo-sub">STREKKODE → PRIS</div>
+    </div>
+    <div id="engine-status" class="status-pill status-warn">LASTER…</div>
+  </header>
+
+  <div class="wrap">
+
+    <!-- ══ IDLE ══ -->
+    <div id="view-idle" class="fade-up">
+      <div class="card" style="text-align:center;">
+        <div style="font-size:60px;margin-bottom:14px">▦</div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:20px;margin-bottom:8px">
+          Skann en strekkode
+        </div>
+        <div style="color:var(--muted);font-size:12px;line-height:1.8;margin-bottom:28px">
+          Pek kamera mot EAN-strekkode.<br>
+          Finn pris i norske nettbutikker — gratis.
+        </div>
+        <button class="btn btn-primary" onclick="startCamera()">📷 ÅPNE KAMERA</button>
+        <button class="btn btn-secondary" onclick="showManual()">✎ SKRIV INN STREKKODE</button>
+      </div>
+
+      <div class="feat-grid">
+        <div class="feat-item">
+          <div class="feat-icon">🇳🇴</div>
+          <div class="feat-label">Norsk database</div>
+          <div class="feat-desc">Open Food Facts + Prisjakt</div>
+        </div>
+        <div class="feat-item">
+          <div class="feat-icon">📷</div>
+          <div class="feat-label">Safari-støtte</div>
+          <div class="feat-desc">Fungerer på iPhone via ZXing</div>
+        </div>
+        <div class="feat-item">
+          <div class="feat-icon">🤖</div>
+          <div class="feat-label">AI-produktinfo</div>
+          <div class="feat-desc">Claude beriker produktdata</div>
+        </div>
+        <div class="feat-item">
+          <div class="feat-icon">⚡</div>
+          <div class="feat-label">EAN / UPC / QR</div>
+          <div class="feat-desc">Alle vanlige strekkodeformater</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ CAMERA ══ -->
+    <div id="view-camera" class="hidden">
+      <div id="cam-wrap">
+        <video id="video" playsinline muted autoplay></video>
+        <div class="cam-overlay"></div>
+        <div class="scan-frame">
+          <div class="corner c-tl"></div>
+          <div class="corner c-tr"></div>
+          <div class="corner c-bl"></div>
+          <div class="corner c-br"></div>
+          <div class="scan-beam"></div>
+        </div>
+        <div id="cam-flash"></div>
+        <div class="cam-hint">HOLD STREKKODE I RAMMEN</div>
+      </div>
+      <div id="cam-error" class="err-banner hidden"></div>
+      <button class="btn btn-secondary" onclick="reset()">← AVBRYT</button>
+    </div>
+
+    <!-- ══ MANUAL ══ -->
+    <div id="view-manual" class="hidden">
+      <div class="card">
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:6px">
+          Manuell innskriving
+        </div>
+        <div style="color:var(--muted);font-size:11px;margin-bottom:22px">
+          EAN-13, UPC-A eller produktnavn
+        </div>
+        <div id="manual-error" class="err-banner hidden"></div>
+        <input id="manual-input" class="text-input"
+          type="text" inputmode="numeric"
+          placeholder="F.eks. 7038010009801"
+          autocomplete="off" autocorrect="off" spellcheck="false" />
+        <button class="btn btn-primary" onclick="handleManualSubmit()">SLÅ OPP PRIS →</button>
+        <button class="btn btn-secondary" id="btn-camera-from-manual" onclick="startCamera()">
+          📷 BRUK KAMERA I STEDET
+        </button>
+        <button class="btn btn-ghost" onclick="reset()">← TILBAKE</button>
+      </div>
+    </div>
+
+    <!-- ══ LOADING ══ -->
+    <div id="view-loading" class="hidden" style="text-align:center;padding:64px 0;">
+      <div class="spinner"></div>
+      <div style="font-family:'Syne',sans-serif;font-weight:600;font-size:16px;margin-bottom:8px">
+        Slår opp…
+      </div>
+      <div id="loading-code" style="font-size:11px;color:var(--muted);letter-spacing:1px;"></div>
+      <div id="loading-step" style="font-size:10px;color:var(--muted);margin-top:6px;letter-spacing:.5px;"></div>
+    </div>
+
+    <!-- ══ RESULT ══ -->
+    <div id="view-result" class="hidden fade-up">
+
+      <!-- Product info card -->
+      <div class="card" style="position:relative;overflow:hidden;" id="result-card">
+        <div id="result-accent-bar" class="accent-bar"></div>
+
+        <div class="result-header">
+          <div class="result-emoji" id="result-emoji">📦</div>
+          <div style="flex:1;min-width:0">
+            <div class="result-name" id="result-name">—</div>
+            <div class="result-brand hidden" id="result-brand"></div>
+            <div id="result-tags"></div>
+          </div>
+        </div>
+
+        <!-- Open Food Facts nutrition strip -->
+        <div id="off-row" class="off-row hidden"></div>
+
+        <div class="result-desc hidden" id="result-desc"></div>
+
+        <div class="result-meta">
+          <div style="color:var(--muted)">
+            EAN: <span style="color:var(--text)" id="result-barcode">—</span>
+          </div>
+          <div id="result-confidence"></div>
+        </div>
+      </div>
+
+      <!-- Price search -->
+      <div class="card card-sm">
+        <div class="section-label">SLÅ OPP PRIS HOS</div>
+        <div class="search-grid" id="search-grid"></div>
+      </div>
+
+      <!-- Search query -->
+      <div class="card card-sm">
+        <div class="section-label">SØKEORD</div>
+        <div class="search-query" id="result-query">—</div>
+      </div>
+
+      <button class="btn btn-secondary" onclick="reset()" style="margin-top:4px">
+        ← SKANN NYTT PRODUKT
+      </button>
+    </div>
+
+  </div><!-- /wrap -->
+
+  <script>
+  const SEARCH_ENGINES = [
+    { label: "Google Shopping", icon: "🛒", url: q => `https://www.google.com/search?q=${enc(q+" kjøp pris")}&tbm=shop` },
+    { label: "Prisjakt",        icon: "💰", url: q => `https://www.prisjakt.no/search.php?search=${enc(q)}` },
+    { label: "Finn.no",         icon: "🔍", url: q => `https://www.finn.no/bap/forsale/search.html?q=${enc(q)}` },
+    { label: "Komplett",        icon: "📦", url: q => `https://www.komplett.no/search?q=${enc(q)}` },
+  ];
+
+  const enc = s => encodeURIComponent(s);
+
+  // ── State ────────────────────────────────────────────
+  let currentBarcode = "";
+  let currentProduct = null;
+  let videoStream    = null;
+  let zxingReader    = null;
+  let scanActive     = false;
+
+  // ── View helpers ─────────────────────────────────────
+  const views = ["idle","camera","manual","loading","result"];
+  function showView(name) {
+    views.forEach(v => {
+      const el = document.getElementById("view-"+v);
+      el.classList.toggle("hidden", v !== name);
+      if (v === name) el.classList.add("fade-up");
+    });
+  }
+  function showManual(err) {
+    stopCamera();
+    showView("manual");
+    if (err) showErr("manual-error", err);
+    setTimeout(() => document.getElementById("manual-input").focus(), 300);
+  }
+
+  function showErr(id, msg) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  }
+  function hideErr(id) {
+    document.getElementById(id).classList.add("hidden");
+  }
+
+  // ── Engine detection ─────────────────────────────────
+  const hasBarcodeDetector = "BarcodeDetector" in window;
+  document.getElementById("engine-status").textContent =
+    hasBarcodeDetector ? "● NATIVE API" : "● ZXING JS";
+  document.getElementById("engine-status").className =
+    "status-pill " + (hasBarcodeDetector ? "status-ok" : "status-warn");
+
+  // ── Camera / ZXing ───────────────────────────────────
+  async function startCamera() {
+    hideErr("cam-error");
+    showView("camera");
+    scanActive = true;
+
+    try {
+      videoStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: {ideal:"environment"}, width:{ideal:1280}, height:{ideal:720} },
+        audio: false,
+      });
+    } catch(e) {
+      showManual("Kameratilgang nektet. Skriv inn strekkode manuelt.");
+      document.getElementById("btn-camera-from-manual").classList.add("hidden");
+      return;
+    }
+
+    const video = document.getElementById("video");
+    video.srcObject = videoStream;
+    await video.play();
+
+    if (hasBarcodeDetector) {
+      // ── Native BarcodeDetector (Chrome / Edge / Android) ──
+      const detector = new BarcodeDetector({
+        formats: ["ean_13","ean_8","upc_a","upc_e","code_128","code_39","qr_code"],
+      });
+      const loop = async () => {
+        if (!scanActive) return;
+        try {
+          const codes = await detector.detect(video);
+          if (codes.length) { onBarcodeFound(codes[0].rawValue); return; }
+        } catch {}
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+
+    } else {
+      // ── ZXing fallback (Safari / Firefox) ──
+      try {
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+          ZXing.BarcodeFormat.EAN_13,
+          ZXing.BarcodeFormat.EAN_8,
+          ZXing.BarcodeFormat.UPC_A,
+          ZXing.BarcodeFormat.UPC_E,
+          ZXing.BarcodeFormat.CODE_128,
+          ZXing.BarcodeFormat.QR_CODE,
+        ]);
+        const reader = new ZXing.BrowserMultiFormatReader(hints, {
+          delayBetweenScanAttempts: 300,
+          delayBetweenScanSuccess: 500,
+        });
+        zxingReader = reader;
+
+        reader.decodeFromVideoElement(video, (result, err) => {
+          if (!scanActive) return;
+          if (result) onBarcodeFound(result.getText());
+        });
+      } catch(e) {
+        showErr("cam-error", "ZXing feilet. Skriv inn strekkode manuelt.");
+      }
+    }
+  }
+
+  function stopCamera() {
+    scanActive = false;
+    if (zxingReader) { try { zxingReader.reset(); } catch{} zxingReader = null; }
+    if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+    const v = document.getElementById("video");
+    v.srcObject = null;
+  }
+
+  // ── Flash animation on hit ────────────────────────────
+  function flashCamera() {
+    const f = document.getElementById("cam-flash");
+    f.classList.remove("flash");
+    void f.offsetWidth;
+    f.classList.add("flash");
+  }
+
+  // ── Barcode found ─────────────────────────────────────
+  async function onBarcodeFound(code) {
+    if (!scanActive) return;
+    scanActive = false;
+    flashCamera();
+    setTimeout(stopCamera, 400);
+
+    currentBarcode = code;
+    setLoadingCode(code);
+    showView("loading");
+    await lookupProduct(code);
+  }
+
+  function setLoadingCode(code) {
+    document.getElementById("loading-code").textContent = code;
+  }
+  function setLoadingStep(msg) {
+    document.getElementById("loading-step").textContent = msg;
+  }
+
+  // ── Manual submit ─────────────────────────────────────
+  async function handleManualSubmit() {
+    const val = document.getElementById("manual-input").value.trim();
+    if (!val) return;
+    hideErr("manual-error");
+    currentBarcode = val;
+    document.getElementById("manual-input").value = "";
+    setLoadingCode(val);
+    showView("loading");
+    await lookupProduct(val);
+  }
+
+  document.getElementById("manual-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") handleManualSubmit();
+  });
+
+  // ─────────────────────────────────────────────────────
+  // LOOKUP — ett kall til Cloudflare Worker
+  // Worker håndterer: KV-cache → Open Food Facts → Claude
+  // ─────────────────────────────────────────────────────
+  const WORKER_URL = "https://ean.forbruker.app"; // bytt til din Worker-URL
+
+  async function lookupProduct(barcode) {
+    setLoadingStep("Sjekker database…");
+    let product = null;
+
+    try {
+      const res = await fetch(`${WORKER_URL}/lookup?ean=${encodeURIComponent(barcode)}`);
+      if (res.ok) {
+        const data = await res.json();
+        // Normaliser felt fra Worker til det render-funksjonen forventer
+        product = {
+          barcode,
+          name:        data.name        || null,
+          brand:       data.brand       || null,
+          category:    data.category    || null,
+          emoji:       data.emoji       || "📦",
+          searchQuery: data.searchQuery || barcode,
+          description: data.description || null,
+          confidence:  data.confidence  || "low",
+          badges: [
+            data.nutriscore ? { label: "Nutri-score " + data.nutriscore } : null,
+            data.ecoscore   ? { label: "Eco-score "   + data.ecoscore   } : null,
+            data.quantity   ? { label: data.quantity                     } : null,
+          ].filter(Boolean),
+          _source: data._source,
+        };
+      }
+    } catch(e) { /* Worker utilgjengelig */ }
+
+    // Fallback hvis Worker er nede
+    if (!product) {
+      product = { barcode, emoji:"📦", confidence:"low", searchQuery: barcode, badges:[] };
+    }
+
+    if (!product.searchQuery || product.searchQuery === barcode) {
+      product.searchQuery = [product.brand, product.name].filter(Boolean).join(" ") || barcode;
+    }
+
+    currentProduct = product;
+    renderResult(product);
+    showView("result");
+  }
+
+  // ── Render result ─────────────────────────────────────
+  function renderResult(p) {
+    document.getElementById("result-emoji").textContent    = p.emoji || "📦";
+    document.getElementById("result-name").textContent     = p.name  || p.barcode;
+    document.getElementById("result-barcode").textContent  = p.barcode;
+    document.getElementById("result-query").textContent    = p.searchQuery || p.barcode;
+
+    // Brand
+    const brandEl = document.getElementById("result-brand");
+    if (p.brand) { brandEl.textContent = p.brand; brandEl.classList.remove("hidden"); }
+    else           brandEl.classList.add("hidden");
+
+    // Tags
+    const tagsEl = document.getElementById("result-tags");
+    tagsEl.innerHTML = "";
+    if (p.category) {
+      const t = document.createElement("span");
+      t.className = "tag"; t.textContent = p.category;
+      tagsEl.appendChild(t);
+    }
+
+    // OFF badges
+    const offRow = document.getElementById("off-row");
+    if (p.badges && p.badges.length) {
+      offRow.innerHTML = p.badges.map(b =>
+        `<span class="off-badge">${b.label}</span>`
+      ).join("");
+      offRow.classList.remove("hidden");
+    } else {
+      offRow.classList.add("hidden");
+    }
+
+    // Description
+    const descEl = document.getElementById("result-desc");
+    if (p.description) {
+      descEl.textContent = p.description;
+      descEl.classList.remove("hidden");
+    } else {
+      descEl.classList.add("hidden");
+    }
+
+    // Confidence
+    const confEl = document.getElementById("result-confidence");
+    const confMap = {
+      high:   ["BEKREFTET", "confidence-high"],
+      medium: ["TROLIG",    "confidence-medium"],
+      low:    ["UKJENT",    "confidence-low"],
+    };
+    const [label, cls] = confMap[p.confidence] || confMap.low;
+    confEl.textContent  = "● " + label;
+    confEl.className    = cls;
+
+    // Accent bar colour
+    const barColours = { high: "var(--accent)", medium: "var(--accent2)", low: "var(--border)" };
+    document.getElementById("result-accent-bar").style.background = barColours[p.confidence] || barColours.low;
+
+    // Search buttons
+    const grid = document.getElementById("search-grid");
+    grid.innerHTML = SEARCH_ENGINES.map(e => `
+      <button class="search-btn" onclick="openSearch('${encodeURIComponent(e.url(p.searchQuery || p.barcode))}')">
+        <span>${e.icon}</span>
+        <span>${e.label}</span>
+      </button>
+    `).join("");
+  }
+
+  function openSearch(encodedUrl) {
+    window.open(decodeURIComponent(encodedUrl), "_blank", "noopener");
+  }
+
+  // ── Reset ─────────────────────────────────────────────
+  function reset() {
+    stopCamera();
+    currentBarcode = "";
+    currentProduct = null;
+    document.getElementById("manual-input").value = "";
+    hideErr("cam-error");
+    hideErr("manual-error");
+    showView("idle");
+  }
+
+  // ── Init ──────────────────────────────────────────────
+  showView("idle");
+  </script>
+</body>
+</html>
