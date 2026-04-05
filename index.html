@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Prisscanner – Skann og finn pris</title>
+  <title>forbruker.app – Skann og sammenlign</title>
   <meta name="description" content="Skann produkt eller strekkode og finn prisen" />
   <meta name="theme-color" content="#0a0a0f" />
 
@@ -232,7 +232,7 @@
   <header>
     <div class="logo-box">◈</div>
     <div>
-      <div class="logo-text">PRISSCANNER</div>
+      <div class="logo-text">FORBRUKER.APP</div>
       <div class="logo-sub">SKANN → SAMMENLIGN → SPAR</div>
     </div>
   </header>
@@ -241,53 +241,30 @@
 
     <!-- ══ IDLE ══ -->
     <div id="view-idle" class="fade-up">
-
-      <!-- Mode selector -->
-      <div class="mode-toggle">
-        <button class="mode-btn barcode active" onclick="selectMode('barcode')">
-          <span class="mode-icon">▦</span>
-          STREKKODE
-        </button>
-        <button class="mode-btn ocr" onclick="selectMode('ocr')">
-          <span class="mode-icon">🔤</span>
-          TEKST/LOGO
-        </button>
-        <button class="mode-btn manual" onclick="selectMode('manual')">
-          <span class="mode-icon">✎</span>
-          MANUELT
-        </button>
-      </div>
-
-      <!-- Barcode mode info -->
-      <div id="idle-barcode" class="card" style="text-align:center;">
-        <div style="font-size:54px;margin-bottom:12px">▦</div>
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:18px;margin-bottom:8px">Skann strekkode</div>
-        <div style="color:var(--muted);font-size:12px;line-height:1.8;margin-bottom:24px">
-          Hold kamera mot EAN-strekkode.<br>Finner produktinfo og priser automatisk.
+      <div class="card" style="text-align:center;">
+        <div style="font-size:54px;margin-bottom:14px">▦</div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:20px;margin-bottom:8px">
+          Skann strekkode
         </div>
-        <button class="btn btn-green" onclick="startBarcodeCamera()">📷 START STREKKODESKANNER</button>
-      </div>
-
-      <!-- OCR mode info -->
-      <div id="idle-ocr" class="card hidden" style="text-align:center;">
-        <div style="font-size:54px;margin-bottom:12px">🔤</div>
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:18px;margin-bottom:8px">Skann tekst eller logo</div>
-        <div style="color:var(--muted);font-size:12px;line-height:1.8;margin-bottom:24px">
-          Ta bilde av produkt, merkenavn eller modellnummer.<br>
-          Velg tekst du vil søke på.
+        <div style="color:var(--muted);font-size:12px;line-height:1.9;margin-bottom:28px">
+          Hold kamera mot EAN-strekkode.<br>
+          Finner produktinfo og priser automatisk.
         </div>
-        <button class="btn btn-orange" onclick="startOcrCamera()">📷 ÅPNE KAMERA FOR BILDE</button>
+        <button class="btn btn-green" onclick="startBarcodeCamera()">📷 START SKANNER</button>
+        <button class="btn btn-secondary" style="margin-top:10px;" onclick="startOcrCamera()">🔤 Skann tekst / logo</button>
+        <button class="btn btn-ghost" onclick="showManualInput()">✎ Skriv inn manuelt</button>
       </div>
 
-      <!-- Manual mode info -->
-      <div id="idle-manual" class="card hidden">
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:6px">Skriv inn manuelt</div>
+      <!-- Manuell innskriving (skjult som standard) -->
+      <div id="manual-card" class="card hidden">
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:6px">Manuell innskriving</div>
         <div style="color:var(--muted);font-size:11px;margin-bottom:18px">EAN-kode, produktnavn eller modellnummer</div>
         <div id="manual-error" class="err-banner hidden"></div>
         <input id="manual-input" class="text-input" type="text"
           placeholder="F.eks. 7038010009801 eller iPhone 15"
           autocomplete="off" autocorrect="off" spellcheck="false" />
-        <button class="btn btn-blue" onclick="handleManualSubmit()">SØK PRIS →</button>
+        <button class="btn btn-blue" onclick="handleManualSubmit()">SØK →</button>
+        <button class="btn btn-ghost" onclick="hideManualInput()">← Tilbake</button>
       </div>
 
       <div style="text-align:center;font-size:10px;color:var(--muted);letter-spacing:1px;margin-top:8px;">
@@ -449,7 +426,6 @@
   const enc = s => encodeURIComponent(s);
 
   // ── State ────────────────────────────────────────────
-  let currentMode    = "barcode";
   let videoStream    = null;
   let ocrStream      = null;
   let zxingReader    = null;
@@ -465,14 +441,15 @@
     });
   }
 
-  // ── Mode selector ────────────────────────────────────
-  function selectMode(mode) {
-    currentMode = mode;
-    document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
-    document.querySelector(`.mode-btn.${mode}`).classList.add("active");
-    ["barcode","ocr","manual"].forEach(m => {
-      document.getElementById("idle-"+m).classList.toggle("hidden", m !== mode);
-    });
+  // ── Manual input toggle ──────────────────────────────
+  function showManualInput() {
+    document.getElementById("manual-card").classList.remove("hidden");
+    document.getElementById("manual-input").focus();
+  }
+  function hideManualInput() {
+    document.getElementById("manual-card").classList.add("hidden");
+    document.getElementById("manual-input").value = "";
+    hideErr("manual-error");
   }
 
   // ── Error helpers ────────────────────────────────────
@@ -575,12 +552,8 @@
     flashCam("cam-flash", "green");
     setTimeout(stopBarcodeCamera, 400);
     currentBarcode = code;
-    openGoogleSearch(code);
-  }
-
-  function openGoogleSearch(query) {
-    window.open("https://www.google.com/search?q=" + encodeURIComponent(query), "_blank", "noopener");
-    showSearchResult(query);
+    // Slå opp mot Open Food Facts — vis produktkort eller prissøk
+    await lookupEAN(code);
   }
 
   function showSearchResult(query) {
@@ -647,8 +620,10 @@
       } catch {}
     }
 
-    if (!product) {
-      product = { barcode, name:null, emoji:"📦", confidence:"low", searchQuery:barcode, badges:[] };
+    if (!product || !product.name) {
+      // Ikke funnet i OFF — gå direkte til prissøk
+      showSearchResult(barcode);
+      return;
     }
 
     renderFoodResult(product);
