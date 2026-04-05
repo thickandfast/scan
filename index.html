@@ -1,16 +1,20 @@
+
 <!DOCTYPE html>
 <html lang="no">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Prisscanner – Strekkode til pris</title>
-  <meta name="description" content="Skann EAN-strekkode og finn prisen i norske nettbutikker" />
+  <title>Prisscanner – Skann og finn pris</title>
+  <meta name="description" content="Skann produkt eller strekkode og finn prisen" />
   <meta name="theme-color" content="#0a0a0f" />
-  <link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;Prisscanner&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;theme_color&quot;:&quot;%230a0a0f&quot;}" />
 
-  <!-- ZXing for Safari (no BarcodeDetector support) -->
+  <!-- ZXing: strekkodeskanning i Safari -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/zxing-js/0.21.3/zxing.min.js"
     integrity="sha512-uODHzBMzPiKhXaKqOWNdFmY5HgNiSj0Z1j7yv7RLKO8w1A9MQK9Pom0yWXHqCQr/3BdFqh8B67K4IU9Hm3yA=="
+    crossorigin="anonymous"></script>
+
+  <!-- Tesseract.js: OCR tekstgjenkjenning -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"
     crossorigin="anonymous"></script>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -25,367 +29,282 @@
       --border: #2a2a3a;
       --accent: #00ff88;
       --accent2: #0099ff;
+      --accent3: #ff9f00;
       --muted: #5a5a7a;
       --text: #e8e8f0;
       --danger: #ff3366;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; overscroll-behavior: none; }
+    body { display: flex; flex-direction: column; align-items: center; padding: 0 16px 64px; min-height: 100%; }
 
-    html, body {
-      height: 100%;
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
-      overscroll-behavior: none;
-    }
-
-    body {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 0 16px 48px;
-      min-height: 100%;
-    }
-
-    /* ── Animations ── */
     @keyframes scanline {
       0%   { top: 8%; opacity: 0; }
       5%   { opacity: 1; }
       95%  { opacity: 1; }
       100% { top: 92%; opacity: 0; }
     }
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(14px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    @keyframes pulse {
-      0%,100% { box-shadow: 0 0 0 0 rgba(0,255,136,.35); }
-      50%      { box-shadow: 0 0 0 10px rgba(0,255,136,0); }
-    }
-    @keyframes flashGreen {
-      0%,100% { background: transparent; }
-      30%     { background: rgba(0,255,136,.25); }
-    }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+    @keyframes spin   { to { transform: rotate(360deg); } }
+    @keyframes pulse  { 0%,100% { box-shadow:0 0 0 0 rgba(0,255,136,.35); } 50% { box-shadow:0 0 0 10px rgba(0,255,136,0); } }
+    @keyframes pulseOrange { 0%,100% { box-shadow:0 0 0 0 rgba(255,159,0,.35); } 50% { box-shadow:0 0 0 10px rgba(255,159,0,0); } }
+    @keyframes flashGreen { 0%,100% { background:transparent; } 30% { background:rgba(0,255,136,.25); } }
+    @keyframes flashOrange { 0%,100% { background:transparent; } 30% { background:rgba(255,159,0,.2); } }
+    @keyframes progress { from { width:0%; } to { width:100%; } }
 
     .fade-up { animation: fadeUp .4s ease both; }
 
-    /* ── Layout ── */
-    .wrap {
-      width: 100%;
-      max-width: 480px;
-    }
+    .wrap { width: 100%; max-width: 480px; }
 
     /* ── Header ── */
     header {
-      width: 100%;
-      max-width: 480px;
-      padding: 24px 0 18px;
+      width: 100%; max-width: 480px;
+      padding: 20px 0 16px;
       border-bottom: 1px solid var(--border);
-      margin-bottom: 24px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
+      margin-bottom: 20px;
+      display: flex; align-items: center; gap: 12px;
     }
     .logo-box {
-      width: 38px; height: 38px;
-      background: var(--accent);
-      border-radius: 9px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 20px; color: #000; font-weight: 900; flex-shrink: 0;
+      width: 36px; height: 36px; background: var(--accent);
+      border-radius: 9px; display: flex; align-items: center;
+      justify-content: center; font-size: 18px; color: #000; font-weight: 900; flex-shrink: 0;
     }
-    .logo-text { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 17px; letter-spacing: -.4px; }
-    .logo-sub  { font-size: 9px; color: var(--muted); letter-spacing: 2.5px; margin-top: 2px; }
-    .status-pill {
-      margin-left: auto;
-      font-size: 9px; letter-spacing: 1.5px;
-      padding: 4px 10px; border-radius: 20px;
-      border: 1px solid;
-    }
-    .status-ok   { color: var(--accent); border-color: rgba(0,255,136,.3); }
-    .status-warn { color: var(--muted);  border-color: var(--border); }
+    .logo-text { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 16px; letter-spacing: -.4px; }
+    .logo-sub  { font-size: 9px; color: var(--muted); letter-spacing: 2px; margin-top: 1px; }
 
-    /* ── Cards ── */
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 28px 20px;
-      margin-bottom: 14px;
+    /* ── Mode toggle ── */
+    .mode-toggle {
+      display: flex; gap: 6px; margin-bottom: 16px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 5px;
     }
-    .card-sm { padding: 18px 20px; }
-
-    /* ── Buttons ── */
-    .btn {
-      width: 100%; padding: 15px;
-      border: none; border-radius: 10px;
-      font-family: 'Syne', sans-serif;
-      font-weight: 700; font-size: 14px;
-      letter-spacing: .4px; cursor: pointer;
-      transition: transform .15s, filter .15s;
+    .mode-btn {
+      flex: 1; padding: 10px 6px;
+      background: transparent; border: none; border-radius: 8px;
+      color: var(--muted); font-family: 'JetBrains Mono', monospace;
+      font-size: 10px; letter-spacing: 1px; cursor: pointer;
+      transition: all .2s; display: flex; flex-direction: column;
+      align-items: center; gap: 4px;
       -webkit-appearance: none;
     }
-    .btn:active { transform: scale(.97); }
-    .btn-primary { background: var(--accent); color: #000; animation: pulse 2.4s ease infinite; }
-    .btn-secondary {
-      background: transparent; color: var(--muted);
+    .mode-btn .mode-icon { font-size: 20px; }
+    .mode-btn.active {
+      background: var(--surface2);
+      color: var(--text);
       border: 1px solid var(--border);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px; margin-top: 10px;
     }
-    .btn-ghost {
-      background: transparent; color: var(--muted);
-      border: none; font-family: 'JetBrains Mono', monospace;
-      font-size: 11px; margin-top: 8px;
-    }
+    .mode-btn.active.barcode { color: var(--accent); border-color: rgba(0,255,136,.3); }
+    .mode-btn.active.ocr     { color: var(--accent3); border-color: rgba(255,159,0,.3); }
+    .mode-btn.active.manual  { color: var(--accent2); border-color: rgba(0,153,255,.3); }
 
-    /* ── Idle features grid ── */
-    .feat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .feat-item {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 10px; padding: 14px 12px;
-    }
-    .feat-icon { font-size: 22px; margin-bottom: 6px; }
-    .feat-label { font-size: 11px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
-    .feat-desc  { font-size: 10px; color: var(--muted); line-height: 1.5; }
+    /* ── Cards ── */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px 18px; margin-bottom: 12px; }
+    .card-sm { padding: 16px 18px; }
 
-    /* ── Camera viewport ── */
+    /* ── Buttons ── */
+    .btn { width:100%; padding:14px; border:none; border-radius:10px; font-family:'Syne',sans-serif; font-weight:700; font-size:14px; letter-spacing:.4px; cursor:pointer; transition:transform .15s; -webkit-appearance:none; }
+    .btn:active { transform: scale(.97); }
+    .btn-green  { background:var(--accent);  color:#000; animation: pulse 2.4s ease infinite; }
+    .btn-orange { background:var(--accent3); color:#000; animation: pulseOrange 2.4s ease infinite; }
+    .btn-blue   { background:var(--accent2); color:#000; }
+    .btn-secondary { background:transparent; color:var(--muted); border:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:12px; margin-top:10px; }
+    .btn-ghost     { background:transparent; color:var(--muted); border:none; font-family:'JetBrains Mono',monospace; font-size:11px; margin-top:8px; }
+
+    /* ── Camera ── */
     #cam-wrap {
-      position: relative;
-      border-radius: 16px; overflow: hidden;
-      background: #000; aspect-ratio: 4/3;
-      margin-bottom: 14px;
+      position: relative; border-radius: 16px; overflow: hidden;
+      background: #000; aspect-ratio: 4/3; margin-bottom: 12px;
     }
-    #video {
-      width: 100%; height: 100%;
-      object-fit: cover; display: block;
-    }
+    #video { width:100%; height:100%; object-fit:cover; display:block; }
     .cam-overlay {
-      position: absolute; inset: 0;
-      background: linear-gradient(to bottom,
-        rgba(0,0,0,.35) 0%, transparent 28%,
-        transparent 72%, rgba(0,0,0,.35) 100%);
+      position:absolute; inset:0;
+      background: linear-gradient(to bottom, rgba(0,0,0,.3) 0%, transparent 25%, transparent 75%, rgba(0,0,0,.3) 100%);
       pointer-events: none;
     }
     .scan-frame {
-      position: absolute;
-      top: 18%; left: 8%; width: 84%; height: 64%;
-      pointer-events: none;
+      position:absolute; top:18%; left:8%; width:84%; height:64%;
+      pointer-events:none;
     }
-    .corner {
-      position: absolute; width: 22px; height: 22px;
-    }
-    .c-tl { top:0; left:0;  border-top: 2.5px solid var(--accent); border-left: 2.5px solid var(--accent); }
-    .c-tr { top:0; right:0; border-top: 2.5px solid var(--accent); border-right: 2.5px solid var(--accent); }
-    .c-bl { bottom:0; left:0;  border-bottom: 2.5px solid var(--accent); border-left: 2.5px solid var(--accent); }
-    .c-br { bottom:0; right:0; border-bottom: 2.5px solid var(--accent); border-right: 2.5px solid var(--accent); }
+    .corner { position:absolute; width:22px; height:22px; }
+    .c-tl { top:0; left:0;   border-top:2.5px solid var(--frame-color,var(--accent)); border-left:2.5px solid var(--frame-color,var(--accent)); }
+    .c-tr { top:0; right:0;  border-top:2.5px solid var(--frame-color,var(--accent)); border-right:2.5px solid var(--frame-color,var(--accent)); }
+    .c-bl { bottom:0; left:0;  border-bottom:2.5px solid var(--frame-color,var(--accent)); border-left:2.5px solid var(--frame-color,var(--accent)); }
+    .c-br { bottom:0; right:0; border-bottom:2.5px solid var(--frame-color,var(--accent)); border-right:2.5px solid var(--frame-color,var(--accent)); }
     .scan-beam {
-      position: absolute; left: 2%; width: 96%; height: 2px;
-      background: linear-gradient(90deg, transparent, var(--accent), transparent);
-      box-shadow: 0 0 10px var(--accent);
+      position:absolute; left:2%; width:96%; height:2px;
+      background:linear-gradient(90deg, transparent, var(--frame-color,var(--accent)), transparent);
+      box-shadow: 0 0 10px var(--frame-color,var(--accent));
       animation: scanline 2.2s ease-in-out infinite;
     }
-    .cam-hint {
-      position: absolute; bottom: 14px; left: 0; right: 0;
-      text-align: center; font-size: 10px;
-      color: rgba(255,255,255,.6); letter-spacing: 1.8px;
-    }
-    #cam-flash {
-      position: absolute; inset: 0;
-      pointer-events: none; border-radius: 16px;
-      animation: none;
-    }
-    #cam-flash.flash { animation: flashGreen .4s ease; }
+    .cam-hint { position:absolute; bottom:12px; left:0; right:0; text-align:center; font-size:10px; color:rgba(255,255,255,.6); letter-spacing:1.5px; }
+    #cam-flash { position:absolute; inset:0; pointer-events:none; border-radius:16px; }
+    #cam-flash.flash-green  { animation: flashGreen  .4s ease; }
+    #cam-flash.flash-orange { animation: flashOrange .4s ease; }
 
-    /* ── Input ── */
-    .text-input {
-      width: 100%; padding: 14px 16px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 8px; color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 16px; outline: none;
-      letter-spacing: 1px; margin-bottom: 12px;
-      -webkit-appearance: none;
+    /* ── Snap button (OCR mode) ── */
+    .snap-btn {
+      position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+      width:56px; height:56px; border-radius:50%;
+      background:rgba(255,159,0,.9); border:3px solid #fff;
+      font-size:22px; cursor:pointer; display:flex;
+      align-items:center; justify-content:center;
+      -webkit-appearance:none; transition:transform .15s;
     }
-    .text-input:focus { border-color: var(--accent); }
+    .snap-btn:active { transform:translateX(-50%) scale(.9); }
 
-    /* ── Spinner ── */
-    .spinner {
-      width: 44px; height: 44px;
-      border: 3px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin .8s linear infinite;
-      margin: 0 auto 20px;
+    /* ── OCR progress bar ── */
+    .ocr-progress-wrap {
+      height:3px; background:var(--border); border-radius:2px; margin-bottom:12px; overflow:hidden;
+    }
+    .ocr-progress-bar {
+      height:100%; background:var(--accent3); border-radius:2px;
+      transition: width .3s ease;
     }
 
-    /* ── Result ── */
-    .result-header { display: flex; gap: 14px; align-items: flex-start; }
-    .result-emoji {
-      width: 58px; height: 58px; flex-shrink: 0;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 30px;
+    /* ── Text chips ── */
+    .chips-label { font-size:9px; color:var(--muted); letter-spacing:2px; margin-bottom:10px; }
+    .chips-wrap  { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+    .chip {
+      padding:8px 14px; background:var(--surface2);
+      border:1px solid var(--border); border-radius:20px;
+      font-size:12px; color:var(--text); cursor:pointer;
+      transition:all .15s; -webkit-appearance:none;
+      font-family:'JetBrains Mono',monospace;
     }
-    .result-name {
-      font-family: 'Syne', sans-serif;
-      font-weight: 700; font-size: 17px;
-      line-height: 1.3; margin-bottom: 4px;
-    }
-    .result-brand { font-size: 11px; color: var(--accent2); letter-spacing: .4px; margin-bottom: 6px; }
-    .tag {
-      display: inline-block;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 4px; padding: 2px 8px;
-      font-size: 10px; color: var(--muted);
-    }
-    .result-desc {
-      margin-top: 14px; padding: 12px 14px;
-      background: var(--surface2); border-radius: 8px;
-      font-size: 12px; color: var(--muted); line-height: 1.7;
-    }
-    .result-meta {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-top: 14px; padding-top: 12px;
-      border-top: 1px solid var(--border);
-      font-size: 10px;
-    }
-    .confidence-high   { color: var(--accent); }
-    .confidence-medium { color: var(--accent2); }
-    .confidence-low    { color: var(--muted); }
-    .accent-bar {
-      position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 16px 16px 0 0;
-    }
+    .chip:active { transform:scale(.95); }
+    .chip.selected { background:rgba(255,159,0,.15); border-color:var(--accent3); color:var(--accent3); }
+    .chip.ean-chip { border-color:rgba(0,255,136,.3); color:var(--accent); background:rgba(0,255,136,.08); }
 
-    /* ── OFF info row ── */
-    .off-row {
-      display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;
+    /* ── Google Custom Search embed ── */
+    #search-container {
+      width:100%; border-radius:12px; overflow:hidden;
+      background:var(--surface); border:1px solid var(--border);
+      margin-bottom:12px;
     }
-    .off-badge {
-      padding: 4px 10px;
-      background: rgba(0,153,255,.1);
-      border: 1px solid rgba(0,153,255,.3);
-      border-radius: 20px; font-size: 10px; color: var(--accent2);
+    #search-container .gcse-search { margin:0; }
+    .gcse-iframe-container { border-radius:12px; }
+
+    /* ── Result card ── */
+    .result-header  { display:flex; gap:12px; align-items:flex-start; }
+    .result-emoji   { width:54px; height:54px; flex-shrink:0; background:var(--surface2); border:1px solid var(--border); border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:28px; }
+    .result-name    { font-family:'Syne',sans-serif; font-weight:700; font-size:16px; line-height:1.3; margin-bottom:4px; }
+    .result-brand   { font-size:11px; color:var(--accent2); margin-bottom:5px; }
+    .tag            { display:inline-block; background:var(--surface2); border:1px solid var(--border); border-radius:4px; padding:2px 8px; font-size:10px; color:var(--muted); }
+    .result-desc    { margin-top:12px; padding:11px 13px; background:var(--surface2); border-radius:8px; font-size:12px; color:var(--muted); line-height:1.7; }
+    .result-meta    { display:flex; justify-content:space-between; margin-top:12px; padding-top:11px; border-top:1px solid var(--border); font-size:10px; }
+    .accent-bar     { position:absolute; top:0; left:0; right:0; height:3px; border-radius:16px 16px 0 0; }
+    .off-row        { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+    .off-badge      { padding:3px 9px; background:rgba(0,153,255,.1); border:1px solid rgba(0,153,255,.3); border-radius:20px; font-size:10px; color:var(--accent2); }
+
+    /* ── Action buttons after result ── */
+    .action-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+    .action-btn {
+      padding:13px 10px; background:var(--surface2); border:1px solid var(--border);
+      border-radius:10px; color:var(--text); font-family:'JetBrains Mono',monospace;
+      font-size:11px; cursor:pointer; display:flex; flex-direction:column;
+      align-items:center; gap:5px; transition:all .15s; -webkit-appearance:none;
     }
+    .action-btn:active { transform:scale(.96); }
+    .action-btn span:first-child { font-size:22px; }
+    .action-btn span:last-child  { color:var(--muted); }
 
-    /* ── Search buttons ── */
-    .search-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .search-btn {
-      padding: 14px 10px;
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 10px; color: var(--text);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px; cursor: pointer;
-      display: flex; flex-direction: column;
-      align-items: center; gap: 6px;
-      transition: transform .15s, border-color .15s;
-      -webkit-appearance: none;
-    }
-    .search-btn:hover { transform: translateY(-2px); border-color: var(--accent); }
-    .search-btn:active { transform: scale(.96); }
-    .search-btn span:first-child { font-size: 24px; }
-    .search-btn span:last-child  { color: var(--muted); letter-spacing: .4px; }
+    /* ── Misc ── */
+    .section-label { font-size:9px; letter-spacing:2.5px; color:var(--muted); margin-bottom:10px; }
+    .spinner { width:40px; height:40px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; margin:0 auto 16px; }
+    .err-banner { padding:10px 13px; border-radius:8px; margin-bottom:10px; background:rgba(255,51,102,.08); border:1px solid rgba(255,51,102,.3); font-size:11px; color:var(--danger); line-height:1.6; }
+    .text-input { width:100%; padding:13px 15px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-family:'JetBrains Mono',monospace; font-size:15px; outline:none; letter-spacing:1px; margin-bottom:11px; -webkit-appearance:none; }
+    .text-input:focus { border-color:var(--accent); }
+    .hidden { display:none !important; }
+    .confidence-high   { color:var(--accent); }
+    .confidence-medium { color:var(--accent2); }
+    .confidence-low    { color:var(--muted); }
 
-    .search-query {
-      padding: 10px 14px;
-      background: var(--surface2); border-radius: 8px;
-      font-size: 13px; color: var(--accent);
-      word-break: break-all; margin-top: 8px; letter-spacing: .3px;
-    }
-
-    /* ── Error banner ── */
-    .err-banner {
-      padding: 11px 14px; border-radius: 8px; margin-bottom: 12px;
-      background: rgba(255,51,102,.08);
-      border: 1px solid rgba(255,51,102,.3);
-      font-size: 11px; color: var(--danger); line-height: 1.6;
-    }
-
-    /* ── Section labels ── */
-    .section-label {
-      font-size: 9px; letter-spacing: 2.5px; color: var(--muted);
-      margin-bottom: 12px;
-    }
-
-    /* ── Hidden ── */
-    .hidden { display: none !important; }
-
-    /* ── iOS safe area ── */
     @supports (padding-bottom: env(safe-area-inset-bottom)) {
-      body { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
+      body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
     }
   </style>
+
+  <!-- Google Custom Search — bytt ut cx= med ditt eget Search Engine ID -->
+  <!-- Opprett på: programmablesearchengine.google.com -->
+  <script async src="https://cse.google.com/cse.js?cx=YOUR_SEARCH_ENGINE_ID"></script>
 </head>
 <body>
 
-  <!-- ── HEADER ── -->
   <header>
     <div class="logo-box">◈</div>
     <div>
       <div class="logo-text">PRISSCANNER</div>
-      <div class="logo-sub">STREKKODE → PRIS</div>
+      <div class="logo-sub">SKANN → SAMMENLIGN → SPAR</div>
     </div>
-    <div id="engine-status" class="status-pill status-warn">LASTER…</div>
   </header>
 
   <div class="wrap">
 
     <!-- ══ IDLE ══ -->
     <div id="view-idle" class="fade-up">
-      <div class="card" style="text-align:center;">
-        <div style="font-size:60px;margin-bottom:14px">▦</div>
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:20px;margin-bottom:8px">
-          Skann en strekkode
-        </div>
-        <div style="color:var(--muted);font-size:12px;line-height:1.8;margin-bottom:28px">
-          Pek kamera mot EAN-strekkode.<br>
-          Finn pris i norske nettbutikker — gratis.
-        </div>
-        <button class="btn btn-primary" onclick="startCamera()">📷 ÅPNE KAMERA</button>
-        <button class="btn btn-secondary" onclick="showManual()">✎ SKRIV INN STREKKODE</button>
+
+      <!-- Mode selector -->
+      <div class="mode-toggle">
+        <button class="mode-btn barcode active" onclick="selectMode('barcode')">
+          <span class="mode-icon">▦</span>
+          STREKKODE
+        </button>
+        <button class="mode-btn ocr" onclick="selectMode('ocr')">
+          <span class="mode-icon">🔤</span>
+          TEKST/LOGO
+        </button>
+        <button class="mode-btn manual" onclick="selectMode('manual')">
+          <span class="mode-icon">✎</span>
+          MANUELT
+        </button>
       </div>
 
-      <div class="feat-grid">
-        <div class="feat-item">
-          <div class="feat-icon">🇳🇴</div>
-          <div class="feat-label">Norsk database</div>
-          <div class="feat-desc">Open Food Facts + Prisjakt</div>
+      <!-- Barcode mode info -->
+      <div id="idle-barcode" class="card" style="text-align:center;">
+        <div style="font-size:54px;margin-bottom:12px">▦</div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:18px;margin-bottom:8px">Skann strekkode</div>
+        <div style="color:var(--muted);font-size:12px;line-height:1.8;margin-bottom:24px">
+          Hold kamera mot EAN-strekkode.<br>Finner produktinfo og priser automatisk.
         </div>
-        <div class="feat-item">
-          <div class="feat-icon">📷</div>
-          <div class="feat-label">Safari-støtte</div>
-          <div class="feat-desc">Fungerer på iPhone via ZXing</div>
+        <button class="btn btn-green" onclick="startBarcodeCamera()">📷 START STREKKODESKANNER</button>
+      </div>
+
+      <!-- OCR mode info -->
+      <div id="idle-ocr" class="card hidden" style="text-align:center;">
+        <div style="font-size:54px;margin-bottom:12px">🔤</div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:18px;margin-bottom:8px">Skann tekst eller logo</div>
+        <div style="color:var(--muted);font-size:12px;line-height:1.8;margin-bottom:24px">
+          Ta bilde av produkt, merkenavn eller modellnummer.<br>
+          Velg tekst du vil søke på.
         </div>
-        <div class="feat-item">
-          <div class="feat-icon">🤖</div>
-          <div class="feat-label">AI-produktinfo</div>
-          <div class="feat-desc">Claude beriker produktdata</div>
-        </div>
-        <div class="feat-item">
-          <div class="feat-icon">⚡</div>
-          <div class="feat-label">EAN / UPC / QR</div>
-          <div class="feat-desc">Alle vanlige strekkodeformater</div>
-        </div>
+        <button class="btn btn-orange" onclick="startOcrCamera()">📷 ÅPNE KAMERA FOR BILDE</button>
+      </div>
+
+      <!-- Manual mode info -->
+      <div id="idle-manual" class="card hidden">
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:6px">Skriv inn manuelt</div>
+        <div style="color:var(--muted);font-size:11px;margin-bottom:18px">EAN-kode, produktnavn eller modellnummer</div>
+        <div id="manual-error" class="err-banner hidden"></div>
+        <input id="manual-input" class="text-input" type="text"
+          placeholder="F.eks. 7038010009801 eller iPhone 15"
+          autocomplete="off" autocorrect="off" spellcheck="false" />
+        <button class="btn btn-blue" onclick="handleManualSubmit()">SØK PRIS →</button>
+      </div>
+
+      <div style="text-align:center;font-size:10px;color:var(--muted);letter-spacing:1px;margin-top:8px;">
+        INGEN ANNONSØRER · INGEN PERSONDATA · GRATIS
       </div>
     </div>
 
-    <!-- ══ CAMERA ══ -->
-    <div id="view-camera" class="hidden">
-      <div id="cam-wrap">
+    <!-- ══ BARCODE CAMERA ══ -->
+    <div id="view-barcode-cam" class="hidden">
+      <div id="cam-wrap" style="--frame-color: var(--accent)">
         <video id="video" playsinline muted autoplay></video>
         <div class="cam-overlay"></div>
         <div class="scan-frame">
-          <div class="corner c-tl"></div>
-          <div class="corner c-tr"></div>
-          <div class="corner c-bl"></div>
-          <div class="corner c-br"></div>
+          <div class="corner c-tl"></div><div class="corner c-tr"></div>
+          <div class="corner c-bl"></div><div class="corner c-br"></div>
           <div class="scan-beam"></div>
         </div>
         <div id="cam-flash"></div>
@@ -395,149 +314,190 @@
       <button class="btn btn-secondary" onclick="reset()">← AVBRYT</button>
     </div>
 
-    <!-- ══ MANUAL ══ -->
-    <div id="view-manual" class="hidden">
+    <!-- ══ OCR CAMERA ══ -->
+    <div id="view-ocr-cam" class="hidden">
+      <div id="ocr-cam-wrap" style="position:relative;border-radius:16px;overflow:hidden;background:#000;aspect-ratio:4/3;margin-bottom:12px;">
+        <video id="ocr-video" playsinline muted autoplay style="width:100%;height:100%;object-fit:cover;display:block;"></video>
+        <div class="cam-overlay"></div>
+        <!-- OCR frame is wider, for text -->
+        <div style="position:absolute;top:30%;left:5%;width:90%;height:40%;pointer-events:none;">
+          <div style="position:absolute;top:0;left:0;width:20px;height:20px;border-top:2.5px solid var(--accent3);border-left:2.5px solid var(--accent3);"></div>
+          <div style="position:absolute;top:0;right:0;width:20px;height:20px;border-top:2.5px solid var(--accent3);border-right:2.5px solid var(--accent3);"></div>
+          <div style="position:absolute;bottom:0;left:0;width:20px;height:20px;border-bottom:2.5px solid var(--accent3);border-left:2.5px solid var(--accent3);"></div>
+          <div style="position:absolute;bottom:0;right:0;width:20px;height:20px;border-bottom:2.5px solid var(--accent3);border-right:2.5px solid var(--accent3);"></div>
+        </div>
+        <div id="ocr-cam-flash"></div>
+        <div style="position:absolute;bottom:14px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,.6);letter-spacing:1.5px;">HOLD PRODUKTET STABILT</div>
+        <button class="snap-btn" onclick="snapPhoto()">📸</button>
+      </div>
+      <button class="btn btn-secondary" onclick="reset()">← AVBRYT</button>
+    </div>
+
+    <!-- ══ OCR PROCESSING ══ -->
+    <div id="view-ocr-processing" class="hidden" style="text-align:center;padding:48px 0;">
+      <div class="spinner" style="border-top-color:var(--accent3);"></div>
+      <div style="font-family:'Syne',sans-serif;font-weight:600;font-size:15px;margin-bottom:8px;">Leser tekst…</div>
+      <div id="ocr-status" style="font-size:11px;color:var(--muted);margin-bottom:16px;"></div>
+      <div class="ocr-progress-wrap" style="width:80%;margin:0 auto;">
+        <div class="ocr-progress-bar" id="ocr-progress-bar" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- ══ OCR RESULT — text chips ══ -->
+    <div id="view-ocr-chips" class="hidden fade-up">
       <div class="card">
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:6px">
-          Manuell innskriving
+        <!-- Preview of snapped image -->
+        <canvas id="snap-canvas" style="width:100%;border-radius:8px;margin-bottom:14px;display:block;"></canvas>
+
+        <div class="chips-label">TRYKK PÅ TEKST DU VIL SØKE PÅ</div>
+        <div class="chips-wrap" id="chips-wrap"></div>
+
+        <div id="selected-query-wrap" class="hidden" style="margin-bottom:14px;">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:2px;margin-bottom:6px;">VALGT SØKEORD</div>
+          <div id="selected-query" style="padding:9px 13px;background:var(--surface2);border-radius:8px;font-size:13px;color:var(--accent3);word-break:break-all;"></div>
         </div>
-        <div style="color:var(--muted);font-size:11px;margin-bottom:22px">
-          EAN-13, UPC-A eller produktnavn
+
+        <div id="ocr-action-btns" class="hidden">
+          <div style="font-size:9px;color:var(--muted);letter-spacing:2px;margin-bottom:10px;">HVA VIL DU GJØRE?</div>
+          <div class="action-row">
+            <button class="action-btn" onclick="doGoogleSearch()">
+              <span>🛒</span><span>SØK PRIS</span>
+            </button>
+            <button class="action-btn" onclick="doFoodSearch()">
+              <span>🥗</span><span>MATVAREINFO</span>
+            </button>
+          </div>
+          <button class="btn btn-secondary" onclick="reset()">← TA NYTT BILDE</button>
         </div>
-        <div id="manual-error" class="err-banner hidden"></div>
-        <input id="manual-input" class="text-input"
-          type="text" inputmode="numeric"
-          placeholder="F.eks. 7038010009801"
-          autocomplete="off" autocorrect="off" spellcheck="false" />
-        <button class="btn btn-primary" onclick="handleManualSubmit()">SLÅ OPP PRIS →</button>
-        <button class="btn btn-secondary" id="btn-camera-from-manual" onclick="startCamera()">
-          📷 BRUK KAMERA I STEDET
-        </button>
-        <button class="btn btn-ghost" onclick="reset()">← TILBAKE</button>
       </div>
     </div>
 
     <!-- ══ LOADING ══ -->
-    <div id="view-loading" class="hidden" style="text-align:center;padding:64px 0;">
+    <div id="view-loading" class="hidden" style="text-align:center;padding:56px 0;">
       <div class="spinner"></div>
-      <div style="font-family:'Syne',sans-serif;font-weight:600;font-size:16px;margin-bottom:8px">
-        Slår opp…
-      </div>
-      <div id="loading-code" style="font-size:11px;color:var(--muted);letter-spacing:1px;"></div>
-      <div id="loading-step" style="font-size:10px;color:var(--muted);margin-top:6px;letter-spacing:.5px;"></div>
+      <div style="font-family:'Syne',sans-serif;font-weight:600;font-size:15px;margin-bottom:6px;">Slår opp…</div>
+      <div id="loading-code"  style="font-size:11px;color:var(--muted);letter-spacing:1px;"></div>
+      <div id="loading-step"  style="font-size:10px;color:var(--muted);margin-top:5px;"></div>
     </div>
 
-    <!-- ══ RESULT ══ -->
-    <div id="view-result" class="hidden fade-up">
-
-      <!-- Product info card -->
-      <div class="card" style="position:relative;overflow:hidden;" id="result-card">
-        <div id="result-accent-bar" class="accent-bar"></div>
-
+    <!-- ══ FOOD RESULT ══ -->
+    <div id="view-food-result" class="hidden fade-up">
+      <div class="card" style="position:relative;overflow:hidden;">
+        <div id="food-accent-bar" class="accent-bar" style="background:var(--accent2)"></div>
         <div class="result-header">
-          <div class="result-emoji" id="result-emoji">📦</div>
-          <div style="flex:1;min-width:0">
-            <div class="result-name" id="result-name">—</div>
-            <div class="result-brand hidden" id="result-brand"></div>
-            <div id="result-tags"></div>
+          <div class="result-emoji" id="food-emoji">🥗</div>
+          <div style="flex:1;min-width:0;">
+            <div class="result-name" id="food-name">—</div>
+            <div class="result-brand hidden" id="food-brand"></div>
+            <div id="food-tags"></div>
           </div>
         </div>
-
-        <!-- Open Food Facts nutrition strip -->
-        <div id="off-row" class="off-row hidden"></div>
-
-        <div class="result-desc hidden" id="result-desc"></div>
-
+        <div id="food-badges" class="off-row hidden"></div>
+        <div class="result-desc hidden" id="food-desc"></div>
         <div class="result-meta">
-          <div style="color:var(--muted)">
-            EAN: <span style="color:var(--text)" id="result-barcode">—</span>
-          </div>
-          <div id="result-confidence"></div>
+          <div style="color:var(--muted);">EAN: <span style="color:var(--text);" id="food-ean">—</span></div>
+          <div id="food-confidence"></div>
         </div>
       </div>
 
-      <!-- Price search -->
       <div class="card card-sm">
-        <div class="section-label">SLÅ OPP PRIS HOS</div>
-        <div class="search-grid" id="search-grid"></div>
+        <div class="section-label">OGSÅ SØK PÅ PRIS</div>
+        <div class="action-row" id="food-search-btns"></div>
       </div>
 
-      <!-- Search query -->
-      <div class="card card-sm">
-        <div class="section-label">SØKEORD</div>
-        <div class="search-query" id="result-query">—</div>
+      <button class="btn btn-secondary" onclick="reset()">← SKANN NYTT PRODUKT</button>
+    </div>
+
+    <!-- ══ GOOGLE SEARCH RESULT ══ -->
+    <div id="view-search" class="hidden fade-up">
+      <div class="card card-sm" style="margin-bottom:10px;">
+        <div class="section-label">SØKER ETTER</div>
+        <div id="search-query-display" style="font-size:13px;color:var(--accent3);word-break:break-all;margin-bottom:12px;"></div>
+        <button class="btn btn-secondary" style="margin-top:0;" onclick="reset()">← SKANN NYTT</button>
       </div>
 
-      <button class="btn btn-secondary" onclick="reset()" style="margin-top:4px">
-        ← SKANN NYTT PRODUKT
-      </button>
+      <!-- Google Custom Search renders here -->
+      <div id="google-search-embed" style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:12px;">
+        <div class="gcse-searchresults-only"></div>
+      </div>
+
+      <!-- Fallback direct links -->
+      <div class="card card-sm">
+        <div class="section-label">ÅPNE DIREKTE I NETTLESER</div>
+        <div class="action-row" id="fallback-search-btns"></div>
+      </div>
     </div>
 
   </div><!-- /wrap -->
 
   <script>
-  const SEARCH_ENGINES = [
-    { label: "Google Shopping", icon: "🛒", url: q => `https://www.google.com/search?q=${enc(q+" kjøp pris")}&tbm=shop` },
-    { label: "Prisjakt",        icon: "💰", url: q => `https://www.prisjakt.no/search.php?search=${enc(q)}` },
-    { label: "Finn.no",         icon: "🔍", url: q => `https://www.finn.no/bap/forsale/search.html?q=${enc(q)}` },
-    { label: "Komplett",        icon: "📦", url: q => `https://www.komplett.no/search?q=${enc(q)}` },
+  // ═══════════════════════════════════════════════════════
+  // CONFIG
+  // ═══════════════════════════════════════════════════════
+  const WORKER_URL = "https://ean.forbruker.app"; // Cloudflare Worker
+
+  // Google Custom Search Engine ID
+  // Opprett på programmablesearchengine.google.com
+  // Lim inn ditt cx= ID her:
+  const GCS_CX = "YOUR_SEARCH_ENGINE_ID";
+
+  const PRICE_ENGINES = [
+    { label:"Google Shopping", icon:"🛒", url: q => `https://www.google.com/search?q=${enc(q+" pris")}&tbm=shop` },
+    { label:"Prisjakt",        icon:"💰", url: q => `https://www.prisjakt.no/search.php?search=${enc(q)}` },
+    { label:"Finn.no",         icon:"🔍", url: q => `https://www.finn.no/bap/forsale/search.html?q=${enc(q)}` },
+    { label:"Komplett",        icon:"📦", url: q => `https://www.komplett.no/search?q=${enc(q)}` },
   ];
 
   const enc = s => encodeURIComponent(s);
 
   // ── State ────────────────────────────────────────────
-  let currentBarcode = "";
-  let currentProduct = null;
+  let currentMode    = "barcode";
   let videoStream    = null;
+  let ocrStream      = null;
   let zxingReader    = null;
   let scanActive     = false;
+  let selectedChips  = [];
+  let currentBarcode = "";
 
-  // ── View helpers ─────────────────────────────────────
-  const views = ["idle","camera","manual","loading","result"];
+  // ── Views ────────────────────────────────────────────
+  const ALL_VIEWS = ["idle","barcode-cam","ocr-cam","ocr-processing","ocr-chips","loading","food-result","search"];
   function showView(name) {
-    views.forEach(v => {
-      const el = document.getElementById("view-"+v);
-      el.classList.toggle("hidden", v !== name);
-      if (v === name) el.classList.add("fade-up");
+    ALL_VIEWS.forEach(v => {
+      document.getElementById("view-"+v).classList.toggle("hidden", v !== name);
     });
   }
-  function showManual(err) {
-    stopCamera();
-    showView("manual");
-    if (err) showErr("manual-error", err);
-    setTimeout(() => document.getElementById("manual-input").focus(), 300);
+
+  // ── Mode selector ────────────────────────────────────
+  function selectMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+    document.querySelector(`.mode-btn.${mode}`).classList.add("active");
+    ["barcode","ocr","manual"].forEach(m => {
+      document.getElementById("idle-"+m).classList.toggle("hidden", m !== mode);
+    });
   }
 
-  function showErr(id, msg) {
-    const el = document.getElementById(id);
-    el.textContent = msg;
-    el.classList.remove("hidden");
-  }
-  function hideErr(id) {
-    document.getElementById(id).classList.add("hidden");
-  }
+  // ── Error helpers ────────────────────────────────────
+  function showErr(id, msg) { const e=document.getElementById(id); e.textContent=msg; e.classList.remove("hidden"); }
+  function hideErr(id)       { document.getElementById(id).classList.add("hidden"); }
 
-  // ── Engine detection ─────────────────────────────────
+  // ═══════════════════════════════════════════════════════
+  // BARCODE CAMERA
+  // ═══════════════════════════════════════════════════════
   const hasBarcodeDetector = "BarcodeDetector" in window;
-  document.getElementById("engine-status").textContent =
-    hasBarcodeDetector ? "● NATIVE API" : "● ZXING JS";
-  document.getElementById("engine-status").className =
-    "status-pill " + (hasBarcodeDetector ? "status-ok" : "status-warn");
 
-  // ── Camera / ZXing ───────────────────────────────────
-  async function startCamera() {
-    hideErr("cam-error");
-    showView("camera");
+  async function startBarcodeCamera() {
+    showView("barcode-cam");
     scanActive = true;
+    hideErr("cam-error");
 
     try {
       videoStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: {ideal:"environment"}, width:{ideal:1280}, height:{ideal:720} },
+        video: { facingMode:{ideal:"environment"}, width:{ideal:1280}, height:{ideal:720} },
         audio: false,
       });
     } catch(e) {
-      showManual("Kameratilgang nektet. Skriv inn strekkode manuelt.");
-      document.getElementById("btn-camera-from-manual").classList.add("hidden");
+      showErr("cam-error", "Kameratilgang nektet. Bruk manuell innskriving.");
       return;
     }
 
@@ -546,9 +506,8 @@
     await video.play();
 
     if (hasBarcodeDetector) {
-      // ── Native BarcodeDetector (Chrome / Edge / Android) ──
       const detector = new BarcodeDetector({
-        formats: ["ean_13","ean_8","upc_a","upc_e","code_128","code_39","qr_code"],
+        formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39","qr_code"],
       });
       const loop = async () => {
         if (!scanActive) return;
@@ -559,218 +518,397 @@
         requestAnimationFrame(loop);
       };
       requestAnimationFrame(loop);
-
     } else {
-      // ── ZXing fallback (Safari / Firefox) ──
+      // ZXing fallback for Safari
       try {
         const hints = new Map();
         hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-          ZXing.BarcodeFormat.EAN_13,
-          ZXing.BarcodeFormat.EAN_8,
-          ZXing.BarcodeFormat.UPC_A,
-          ZXing.BarcodeFormat.UPC_E,
-          ZXing.BarcodeFormat.CODE_128,
-          ZXing.BarcodeFormat.QR_CODE,
+          ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+          ZXing.BarcodeFormat.UPC_A,  ZXing.BarcodeFormat.UPC_E,
+          ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.QR_CODE,
         ]);
-        const reader = new ZXing.BrowserMultiFormatReader(hints, {
-          delayBetweenScanAttempts: 300,
-          delayBetweenScanSuccess: 500,
-        });
-        zxingReader = reader;
-
-        reader.decodeFromVideoElement(video, (result, err) => {
-          if (!scanActive) return;
-          if (result) onBarcodeFound(result.getText());
+        zxingReader = new ZXing.BrowserMultiFormatReader(hints, { delayBetweenScanAttempts:300 });
+        zxingReader.decodeFromVideoElement(video, (result) => {
+          if (!scanActive || !result) return;
+          onBarcodeFound(result.getText());
         });
       } catch(e) {
-        showErr("cam-error", "ZXing feilet. Skriv inn strekkode manuelt.");
+        showErr("cam-error", "Kan ikke skanne. Bruk manuell innskriving.");
       }
     }
   }
 
-  function stopCamera() {
+  function stopBarcodeCamera() {
     scanActive = false;
     if (zxingReader) { try { zxingReader.reset(); } catch{} zxingReader = null; }
-    if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+    if (videoStream) { videoStream.getTracks().forEach(t=>t.stop()); videoStream = null; }
     const v = document.getElementById("video");
-    v.srcObject = null;
+    if (v) v.srcObject = null;
   }
 
-  // ── Flash animation on hit ────────────────────────────
-  function flashCamera() {
-    const f = document.getElementById("cam-flash");
-    f.classList.remove("flash");
+  function flashCam(id, type) {
+    const f = document.getElementById(id);
+    f.className = "";
     void f.offsetWidth;
-    f.classList.add("flash");
+    f.className = "flash-" + type;
   }
 
-  // ── Barcode found ─────────────────────────────────────
   async function onBarcodeFound(code) {
     if (!scanActive) return;
     scanActive = false;
-    flashCamera();
-    setTimeout(stopCamera, 400);
-
+    flashCam("cam-flash", "green");
+    setTimeout(stopBarcodeCamera, 400);
     currentBarcode = code;
-    setLoadingCode(code);
+    await lookupEAN(code);
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // EAN LOOKUP (via Cloudflare Worker → Open Food Facts)
+  // ═══════════════════════════════════════════════════════
+  async function lookupEAN(barcode) {
     showView("loading");
-    await lookupProduct(code);
+    document.getElementById("loading-code").textContent = barcode;
+    document.getElementById("loading-step").textContent = "Sjekker produktdatabase…";
+
+    let product = null;
+
+    // Prøv Worker (KV cache → Open Food Facts)
+    try {
+      const res = await fetch(`${WORKER_URL}/lookup?ean=${enc(barcode)}`);
+      if (res.ok) {
+        const d = await res.json();
+        product = {
+          barcode, name: d.name, brand: d.brand,
+          category: d.category, emoji: d.emoji || "📦",
+          searchQuery: d.searchQuery || barcode,
+          description: d.description,
+          confidence: d.confidence || "low",
+          badges: [
+            d.nutriscore ? { label:"Nutri-score "+d.nutriscore } : null,
+            d.ecoscore   ? { label:"Eco-score "+d.ecoscore     } : null,
+            d.quantity   ? { label: d.quantity                  } : null,
+          ].filter(Boolean),
+        };
+      }
+    } catch {}
+
+    // Fallback: direkte mot Open Food Facts
+    if (!product || !product.name) {
+      document.getElementById("loading-step").textContent = "Sjekker Open Food Facts…";
+      try {
+        const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${barcode}?fields=product_name,brands,categories_tags,nutriscore_grade,ecoscore_grade,quantity`);
+        const d = await r.json();
+        if (d.status === 1 && d.product?.product_name) {
+          const p = d.product;
+          const cat = (p.categories_tags||[]).map(c=>c.replace(/^[a-z]{2}:/,"").replace(/-/g," ")).filter(c=>!c.includes(":"))[0]||null;
+          product = {
+            barcode, name: p.product_name, brand: p.brands||null,
+            category: cat, emoji: categoryEmoji(p.categories_tags||[]),
+            searchQuery: [p.brands, p.product_name].filter(Boolean).join(" "),
+            description: null, confidence: "high",
+            badges: [
+              p.nutriscore_grade ? { label:"Nutri-score "+p.nutriscore_grade.toUpperCase() } : null,
+              p.ecoscore_grade   ? { label:"Eco-score "+p.ecoscore_grade.toUpperCase()     } : null,
+              p.quantity         ? { label: p.quantity                                      } : null,
+            ].filter(Boolean),
+          };
+        }
+      } catch {}
+    }
+
+    if (!product) {
+      product = { barcode, name:null, emoji:"📦", confidence:"low", searchQuery:barcode, badges:[] };
+    }
+
+    renderFoodResult(product);
+    showView("food-result");
   }
 
-  function setLoadingCode(code) {
-    document.getElementById("loading-code").textContent = code;
-  }
-  function setLoadingStep(msg) {
-    document.getElementById("loading-step").textContent = msg;
+  function renderFoodResult(p) {
+    document.getElementById("food-emoji").textContent = p.emoji || "📦";
+    document.getElementById("food-name").textContent  = p.name  || p.barcode;
+    document.getElementById("food-ean").textContent   = p.barcode;
+
+    const brandEl = document.getElementById("food-brand");
+    if (p.brand) { brandEl.textContent = p.brand; brandEl.classList.remove("hidden"); }
+    else           brandEl.classList.add("hidden");
+
+    const tagsEl = document.getElementById("food-tags");
+    tagsEl.innerHTML = p.category ? `<span class="tag">${p.category}</span>` : "";
+
+    const badgesEl = document.getElementById("food-badges");
+    if (p.badges?.length) {
+      badgesEl.innerHTML = p.badges.map(b=>`<span class="off-badge">${b.label}</span>`).join("");
+      badgesEl.classList.remove("hidden");
+    } else badgesEl.classList.add("hidden");
+
+    const descEl = document.getElementById("food-desc");
+    if (p.description) { descEl.textContent = p.description; descEl.classList.remove("hidden"); }
+    else descEl.classList.add("hidden");
+
+    const confMap = { high:["BEKREFTET","confidence-high"], medium:["TROLIG","confidence-medium"], low:["UKJENT","confidence-low"] };
+    const [lbl,cls] = confMap[p.confidence]||confMap.low;
+    const confEl = document.getElementById("food-confidence");
+    confEl.textContent = "● "+lbl; confEl.className = cls;
+
+    // Price search buttons
+    const q = p.searchQuery || p.barcode;
+    document.getElementById("food-search-btns").innerHTML = PRICE_ENGINES.slice(0,2).map(e=>`
+      <button class="action-btn" onclick="window.open('${e.url(q)}','_blank','noopener')">
+        <span>${e.icon}</span><span>${e.label}</span>
+      </button>`).join("");
   }
 
-  // ── Manual submit ─────────────────────────────────────
+  // ═══════════════════════════════════════════════════════
+  // OCR CAMERA
+  // ═══════════════════════════════════════════════════════
+  async function startOcrCamera() {
+    showView("ocr-cam");
+    try {
+      ocrStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode:{ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} },
+        audio: false,
+      });
+      const v = document.getElementById("ocr-video");
+      v.srcObject = ocrStream;
+      await v.play();
+    } catch(e) {
+      alert("Kameratilgang nektet. Prøv manuell innskriving.");
+      reset();
+    }
+  }
+
+  function stopOcrCamera() {
+    if (ocrStream) { ocrStream.getTracks().forEach(t=>t.stop()); ocrStream = null; }
+    const v = document.getElementById("ocr-video");
+    if (v) v.srcObject = null;
+  }
+
+  // ── Snap photo and run OCR ───────────────────────────
+  async function snapPhoto() {
+    // Flash
+    const f = document.getElementById("ocr-cam-flash");
+    f.style.background = "rgba(255,255,255,.6)";
+    setTimeout(()=>f.style.background="", 200);
+
+    // Capture frame to canvas
+    const video  = document.getElementById("ocr-video");
+    const canvas = document.getElementById("snap-canvas");
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0);
+
+    stopOcrCamera();
+    showView("ocr-processing");
+
+    // Run Tesseract OCR
+    try {
+      const worker = await Tesseract.createWorker("eng+nor", 1, {
+        logger: m => {
+          if (m.status === "recognizing text") {
+            document.getElementById("ocr-progress-bar").style.width = (m.progress*100).toFixed(0)+"%";
+            document.getElementById("ocr-status").textContent = "Analyserer… "+Math.round(m.progress*100)+"%";
+          } else {
+            document.getElementById("ocr-status").textContent = m.status;
+          }
+        },
+      });
+
+      const { data } = await worker.recognize(canvas);
+      await worker.terminate();
+
+      processOcrText(data.text, data.words || []);
+    } catch(e) {
+      alert("OCR feilet. Prøv igjen eller skriv inn manuelt.");
+      reset();
+    }
+  }
+
+  // ── Process OCR output into chips ───────────────────
+  function processOcrText(rawText, words) {
+    // Extract meaningful tokens
+    const lines  = rawText.split("\n").map(l=>l.trim()).filter(Boolean);
+    const tokens = new Set();
+
+    // Add full lines (if short enough to be product names)
+    lines.forEach(line => {
+      if (line.length >= 2 && line.length <= 60) tokens.add(line);
+    });
+
+    // Add individual words ≥ 3 chars, filter noise
+    words.forEach(w => {
+      const t = w.text.trim().replace(/[^a-zA-Z0-9æøåÆØÅ\-\.]/g,"");
+      if (t.length >= 3 && w.confidence > 60) tokens.add(t);
+    });
+
+    // Detect EAN-like numbers
+    const eanMatches = rawText.match(/\b\d{8,14}\b/g) || [];
+
+    showView("ocr-chips");
+    selectedChips = [];
+
+    const wrap = document.getElementById("chips-wrap");
+    wrap.innerHTML = "";
+
+    // EAN chips first
+    eanMatches.forEach(ean => {
+      const btn = document.createElement("button");
+      btn.className = "chip ean-chip";
+      btn.textContent = "▦ " + ean;
+      btn.dataset.value = ean;
+      btn.dataset.isEan = "true";
+      btn.onclick = () => toggleChip(btn, ean, true);
+      wrap.appendChild(btn);
+    });
+
+    // Text chips
+    [...tokens].slice(0, 24).forEach(tok => {
+      const btn = document.createElement("button");
+      btn.className = "chip";
+      btn.textContent = tok;
+      btn.dataset.value = tok;
+      btn.onclick = () => toggleChip(btn, tok, false);
+      wrap.appendChild(btn);
+    });
+
+    if (wrap.children.length === 0) {
+      wrap.innerHTML = `<div style="color:var(--muted);font-size:12px;">Ingen tekst funnet — prøv igjen med bedre lys.</div>`;
+    }
+
+    document.getElementById("selected-query-wrap").classList.add("hidden");
+    document.getElementById("ocr-action-btns").classList.add("hidden");
+  }
+
+  function toggleChip(btn, value, isEan) {
+    btn.classList.toggle("selected");
+    if (btn.classList.contains("selected")) {
+      selectedChips.push(value);
+    } else {
+      selectedChips = selectedChips.filter(c => c !== value);
+    }
+    updateSelectedQuery(isEan);
+  }
+
+  function updateSelectedQuery(lastWasEan) {
+    const queryEl = document.getElementById("selected-query");
+    const wrapEl  = document.getElementById("selected-query-wrap");
+    const actEl   = document.getElementById("ocr-action-btns");
+
+    if (selectedChips.length === 0) {
+      wrapEl.classList.add("hidden");
+      actEl.classList.add("hidden");
+      return;
+    }
+
+    const query = selectedChips.join(" ");
+    queryEl.textContent = query;
+    wrapEl.classList.remove("hidden");
+    actEl.classList.remove("hidden");
+
+    // Hide food lookup if not EAN
+    const foodBtn = actEl.querySelector(".action-btn:last-child");
+    if (foodBtn) {
+      foodBtn.style.display = lastWasEan || /^\d{8,14}$/.test(selectedChips[selectedChips.length-1]) ? "" : "none";
+    }
+  }
+
+  // ── OCR actions ──────────────────────────────────────
+  function doGoogleSearch() {
+    const query = selectedChips.join(" ");
+    if (!query) return;
+    showGoogleSearch(query);
+  }
+
+  async function doFoodSearch() {
+    const possible = selectedChips.find(c => /^\d{8,14}$/.test(c));
+    if (possible) {
+      await lookupEAN(possible);
+    } else {
+      const query = selectedChips.join(" ");
+      showGoogleSearch(query + " matvare næringsinnhold");
+    }
+  }
+
+  // ── Manual submit ────────────────────────────────────
   async function handleManualSubmit() {
     const val = document.getElementById("manual-input").value.trim();
     if (!val) return;
     hideErr("manual-error");
-    currentBarcode = val;
     document.getElementById("manual-input").value = "";
-    setLoadingCode(val);
-    showView("loading");
-    await lookupProduct(val);
+
+    if (/^\d{8,14}$/.test(val)) {
+      await lookupEAN(val);
+    } else {
+      showGoogleSearch(val);
+    }
   }
 
   document.getElementById("manual-input").addEventListener("keydown", e => {
     if (e.key === "Enter") handleManualSubmit();
   });
 
-  // ─────────────────────────────────────────────────────
-  // LOOKUP — ett kall til Cloudflare Worker
-  // Worker håndterer: KV-cache → Open Food Facts → Claude
-  // ─────────────────────────────────────────────────────
-  const WORKER_URL = "https://ean.forbruker.app"; // bytt til din Worker-URL
+  // ═══════════════════════════════════════════════════════
+  // GOOGLE CUSTOM SEARCH
+  // ═══════════════════════════════════════════════════════
+  function showGoogleSearch(query) {
+    showView("search");
+    document.getElementById("search-query-display").textContent = query;
 
-  async function lookupProduct(barcode) {
-    setLoadingStep("Sjekker database…");
-    let product = null;
+    // Render fallback direct links
+    document.getElementById("fallback-search-btns").innerHTML =
+      PRICE_ENGINES.slice(0,4).map(e=>`
+        <button class="action-btn" onclick="window.open('${e.url(query)}','_blank','noopener')">
+          <span>${e.icon}</span><span>${e.label}</span>
+        </button>`).join("");
 
-    try {
-      const res = await fetch(`${WORKER_URL}/lookup?ean=${encodeURIComponent(barcode)}`);
-      if (res.ok) {
-        const data = await res.json();
-        // Normaliser felt fra Worker til det render-funksjonen forventer
-        product = {
-          barcode,
-          name:        data.name        || null,
-          brand:       data.brand       || null,
-          category:    data.category    || null,
-          emoji:       data.emoji       || "📦",
-          searchQuery: data.searchQuery || barcode,
-          description: data.description || null,
-          confidence:  data.confidence  || "low",
-          badges: [
-            data.nutriscore ? { label: "Nutri-score " + data.nutriscore } : null,
-            data.ecoscore   ? { label: "Eco-score "   + data.ecoscore   } : null,
-            data.quantity   ? { label: data.quantity                     } : null,
-          ].filter(Boolean),
-          _source: data._source,
-        };
-      }
-    } catch(e) { /* Worker utilgjengelig */ }
-
-    // Fallback hvis Worker er nede
-    if (!product) {
-      product = { barcode, emoji:"📦", confidence:"low", searchQuery: barcode, badges:[] };
+    // Trigger Google Custom Search
+    if (window.__gcse && GCS_CX !== "YOUR_SEARCH_ENGINE_ID") {
+      // If GCSE is loaded, programmatically search
+      try {
+        google.search.cse.element.getElement("searchresults").execute(query);
+      } catch {}
     }
-
-    if (!product.searchQuery || product.searchQuery === barcode) {
-      product.searchQuery = [product.brand, product.name].filter(Boolean).join(" ") || barcode;
-    }
-
-    currentProduct = product;
-    renderResult(product);
-    showView("result");
   }
 
-  // ── Render result ─────────────────────────────────────
-  function renderResult(p) {
-    document.getElementById("result-emoji").textContent    = p.emoji || "📦";
-    document.getElementById("result-name").textContent     = p.name  || p.barcode;
-    document.getElementById("result-barcode").textContent  = p.barcode;
-    document.getElementById("result-query").textContent    = p.searchQuery || p.barcode;
-
-    // Brand
-    const brandEl = document.getElementById("result-brand");
-    if (p.brand) { brandEl.textContent = p.brand; brandEl.classList.remove("hidden"); }
-    else           brandEl.classList.add("hidden");
-
-    // Tags
-    const tagsEl = document.getElementById("result-tags");
-    tagsEl.innerHTML = "";
-    if (p.category) {
-      const t = document.createElement("span");
-      t.className = "tag"; t.textContent = p.category;
-      tagsEl.appendChild(t);
-    }
-
-    // OFF badges
-    const offRow = document.getElementById("off-row");
-    if (p.badges && p.badges.length) {
-      offRow.innerHTML = p.badges.map(b =>
-        `<span class="off-badge">${b.label}</span>`
-      ).join("");
-      offRow.classList.remove("hidden");
-    } else {
-      offRow.classList.add("hidden");
-    }
-
-    // Description
-    const descEl = document.getElementById("result-desc");
-    if (p.description) {
-      descEl.textContent = p.description;
-      descEl.classList.remove("hidden");
-    } else {
-      descEl.classList.add("hidden");
-    }
-
-    // Confidence
-    const confEl = document.getElementById("result-confidence");
-    const confMap = {
-      high:   ["BEKREFTET", "confidence-high"],
-      medium: ["TROLIG",    "confidence-medium"],
-      low:    ["UKJENT",    "confidence-low"],
-    };
-    const [label, cls] = confMap[p.confidence] || confMap.low;
-    confEl.textContent  = "● " + label;
-    confEl.className    = cls;
-
-    // Accent bar colour
-    const barColours = { high: "var(--accent)", medium: "var(--accent2)", low: "var(--border)" };
-    document.getElementById("result-accent-bar").style.background = barColours[p.confidence] || barColours.low;
-
-    // Search buttons
-    const grid = document.getElementById("search-grid");
-    grid.innerHTML = SEARCH_ENGINES.map(e => `
-      <button class="search-btn" onclick="openSearch('${encodeURIComponent(e.url(p.searchQuery || p.barcode))}')">
-        <span>${e.icon}</span>
-        <span>${e.label}</span>
-      </button>
-    `).join("");
+  // ═══════════════════════════════════════════════════════
+  // UTILITIES
+  // ═══════════════════════════════════════════════════════
+  function categoryEmoji(tags) {
+    const j = tags.join(" ").toLowerCase();
+    const m = [
+      [/beverages|drinks|juice|water|soda|drikke/,"🥤"],
+      [/milk|dairy|cheese|yogurt|melk|ost/,"🥛"],
+      [/bread|bakery|biscuit|brød|bakeri/,"🍞"],
+      [/chocolate|candy|sweets|sjokolade|konfekt/,"🍫"],
+      [/meat|poultry|chicken|beef|kjøtt/,"🥩"],
+      [/fish|seafood|salmon|fisk/,"🐟"],
+      [/fruit|apple|berry|frukt/,"🍎"],
+      [/vegetable|salad|grønnsak/,"🥦"],
+      [/snacks|chips|nuts|nøtter/,"🍟"],
+      [/coffee|tea|kaffe|te/,"☕"],
+      [/pasta|rice|ris/,"🍝"],
+      [/sauce|ketchup|saus/,"🫙"],
+      [/frozen|ice.cream|iskrem/,"🍦"],
+      [/oil|butter|smør/,"🧈"],
+    ];
+    for (const [rx,em] of m) if (rx.test(j)) return em;
+    return "📦";
   }
 
-  function openSearch(encodedUrl) {
-    window.open(decodeURIComponent(encodedUrl), "_blank", "noopener");
-  }
-
-  // ── Reset ─────────────────────────────────────────────
   function reset() {
-    stopCamera();
+    stopBarcodeCamera();
+    stopOcrCamera();
+    selectedChips = [];
     currentBarcode = "";
-    currentProduct = null;
     document.getElementById("manual-input").value = "";
-    hideErr("cam-error");
     hideErr("manual-error");
     showView("idle");
   }
 
-  // ── Init ──────────────────────────────────────────────
+  // ── Init ────────────────────────────────────────────
   showView("idle");
+  selectMode("barcode");
   </script>
 </body>
 </html>
