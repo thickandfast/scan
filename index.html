@@ -8,6 +8,9 @@
   <meta name="description" content="Skann produkt eller strekkode og finn prisen" />
   <meta name="theme-color" content="#0a0a0f" />
 
+  <!-- ZXing browser: strekkodeskanning inkl. Safari -->
+  <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js"></script>
+
   <!-- Tesseract.js: OCR tekstgjenkjenning -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"
     crossorigin="anonymous"></script>
@@ -477,21 +480,15 @@
   function hideErr(id)       { document.getElementById(id).classList.add("hidden"); }
 
   // ═══════════════════════════════════════════════════════
-  // BARCODE CAMERA
-  // Canvas-loop: snapshot hvert sekund via Blob → ImageBitmap
-  // → BarcodeDetector. Fungerer i Safari (iOS 17+).
+  // BARCODE CAMERA — ZXing @zxing/browser
+  // decodeFromVideoElement looper automatisk i Safari
   // ═══════════════════════════════════════════════════════
-  const hasBarcodeDetector = "BarcodeDetector" in window;
-  let scanCanvas = null;
-  let scanLoopTimer = null;
+  let zxingReader = null;
 
   async function startBarcodeCamera() {
     showView("barcode-cam");
     scanActive = true;
     hideErr("cam-error");
-
-    // Opprett offscreen canvas for snapshot-loop
-    scanCanvas = document.createElement("canvas");
 
     try {
       videoStream = await navigator.mediaDevices.getUserMedia({
@@ -511,63 +508,35 @@
     video.srcObject = videoStream;
     await video.play();
 
-    if (!hasBarcodeDetector) {
-      // iOS 16 og eldre: BarcodeDetector finnes ikke
-      showErr("cam-error", "Automatisk skanning krever iOS 17+. Oppgrader iOS eller skriv inn strekkoden manuelt.");
-      return;
-    }
+    // ── ZXing @zxing/browser ──────────────────────────
+    // Støtter Safari, looper automatisk fra video-element
+    try {
+      const hints = new Map();
+      hints.set(ZXingBrowser.DecodeHintType.TRY_HARDER, true);
 
-    const detector = new BarcodeDetector({
-      formats: ["ean_13","ean_8","upc_a","upc_e","code_128","code_39","qr_code"],
-    });
+      zxingReader = new ZXingBrowser.BrowserMultiFormatReader(hints, {
+        delayBetweenScanAttempts: 300,
+        delayBetweenScanSuccess:  500,
+      });
 
-    // ── Canvas-loop: hvert sekund ──────────────────────
-    // Vi bruker setTimeout (ikke rAF) for å spare batteri
-    // og fordi 1 fps er nok for strekkodeskanning
-    async function scanTick() {
-      if (!scanActive) return;
-
-      if (video.readyState < 2 || video.videoWidth === 0) {
-        // Video ikke klar ennå — vent litt
-        scanLoopTimer = setTimeout(scanTick, 200);
-        return;
-      }
-
-      // Snapshot til canvas
-      scanCanvas.width  = video.videoWidth;
-      scanCanvas.height = video.videoHeight;
-      scanCanvas.getContext("2d").drawImage(video, 0, 0);
-
-      try {
-        // Konverter til Blob → ImageBitmap (Safari-kompatibelt)
-        const blob = await new Promise(res => scanCanvas.toBlob(res, "image/jpeg", 0.92));
-        const bmp  = await createImageBitmap(blob);
-        const codes = await detector.detect(bmp);
-        bmp.close(); // frigir minne
-
-        if (codes.length && scanActive) {
-          onBarcodeFound(codes[0].rawValue);
-          return; // stopp loopen
+      zxingReader.decodeFromVideoElement(video, (result, err, controls) => {
+        if (!scanActive) { controls.stop(); return; }
+        if (result) {
+          controls.stop();
+          onBarcodeFound(result.getText());
         }
-      } catch(e) {
-        // Ignorer enkeltfeil, fortsett scanning
-      }
+        // err er forventet når ingen kode — ignorer
+      });
 
-      // Prøv igjen om 800ms
-      if (scanActive) scanLoopTimer = setTimeout(scanTick, 800);
+    } catch(e) {
+      showErr("cam-error", "Strekkodeskanner feilet: " + e.message + ". Bruk manuell innskriving.");
     }
-
-    // Start loopen når video faktisk spiller
-    video.addEventListener("playing", () => {
-      scanLoopTimer = setTimeout(scanTick, 500);
-    }, { once: true });
   }
 
   function stopBarcodeCamera() {
     scanActive = false;
-    if (scanLoopTimer) { clearTimeout(scanLoopTimer); scanLoopTimer = null; }
-    if (videoStream)   { videoStream.getTracks().forEach(t=>t.stop()); videoStream = null; }
-    scanCanvas = null;
+    if (zxingReader) { try { zxingReader.reset(); } catch{} zxingReader = null; }
+    if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
     const v = document.getElementById("video");
     if (v) v.srcObject = null;
   }
@@ -585,14 +554,11 @@
     flashCam("cam-flash", "green");
     setTimeout(stopBarcodeCamera, 400);
     currentBarcode = code;
-    // Åpne Google-søk direkte med EAN
     openGoogleSearch(code);
   }
 
   function openGoogleSearch(query) {
-    const url = "https://www.google.com/search?q=" + encodeURIComponent(query);
-    window.open(url, "_blank", "noopener");
-    // Vis også resultatsiden internt
+    window.open("https://www.google.com/search?q=" + encodeURIComponent(query), "_blank", "noopener");
     showSearchResult(query);
   }
 
