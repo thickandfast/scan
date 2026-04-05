@@ -28,13 +28,13 @@
       --accent: #00ff88;
       --accent2: #0099ff;
       --accent3: #ff9f00;
-      --muted: #5a5a7a;
-      --text: #e8e8f0;
+      --muted: #9090b0;
+      --text: #f0f0fa;
       --danger: #ff3366;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; overscroll-behavior: none; }
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; overscroll-behavior: none; font-size: 15px; }
     body { display: flex; flex-direction: column; align-items: center; padding: 0 16px 64px; min-height: 100%; }
 
     @keyframes scanline {
@@ -223,14 +223,23 @@
     }
   </style>
 
-  <!-- Google Custom Search — bytt ut cx= med ditt eget Search Engine ID -->
-  <!-- Opprett på: programmablesearchengine.google.com -->
-  <script async src="https://cse.google.com/cse.js?cx=YOUR_SEARCH_ENGINE_ID"></script>
 </head>
 <body>
 
   <header>
-    <div class="logo-box">◈</div>
+    <div class="logo-box">
+      <svg width="22" height="18" viewBox="0 0 22 18" fill="none">
+        <rect x="0" y="0" width="2" height="18" fill="#000"/>
+        <rect x="3" y="0" width="1" height="18" fill="#000"/>
+        <rect x="5" y="0" width="2" height="18" fill="#000"/>
+        <rect x="8" y="0" width="1" height="18" fill="#000"/>
+        <rect x="10" y="0" width="3" height="18" fill="#000"/>
+        <rect x="14" y="0" width="1" height="18" fill="#000"/>
+        <rect x="16" y="0" width="2" height="18" fill="#000"/>
+        <rect x="19" y="0" width="1" height="18" fill="#000"/>
+        <rect x="21" y="0" width="1" height="18" fill="#000"/>
+      </svg>
+    </div>
     <div>
       <div class="logo-text">FORBRUKER.APP</div>
       <div class="logo-sub">SKANN → SAMMENLIGN → SPAR</div>
@@ -376,31 +385,23 @@
       </div>
 
       <div class="card card-sm">
-        <div class="section-label">OGSÅ SØK PÅ PRIS</div>
-        <div class="action-row" id="food-search-btns"></div>
+        <div class="section-label">SØK PÅ PRIS</div>
+        <button class="btn btn-green" style="animation:none;" id="food-google-btn" onclick="">🔍 SØK PÅ GOOGLE</button>
+        <button class="btn btn-secondary" style="margin-top:8px;" onclick="resetAndScan()">← SKANN NYTT PRODUKT</button>
       </div>
-
-      <button class="btn btn-secondary" onclick="reset()">← SKANN NYTT PRODUKT</button>
     </div>
 
     <!-- ══ GOOGLE SEARCH RESULT ══ -->
     <div id="view-search" class="hidden fade-up">
-      <div class="card card-sm" style="margin-bottom:10px;">
-        <div class="section-label">SØKER ETTER</div>
-        <div id="search-query-display" style="font-size:13px;color:var(--accent3);word-break:break-all;margin-bottom:12px;"></div>
-        <button class="btn btn-secondary" style="margin-top:0;" onclick="reset()">← SKANN NYTT</button>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <button class="btn btn-secondary" style="width:auto;padding:10px 16px;margin-top:0;" onclick="resetAndScan()">←</button>
+        <div id="search-query-display" style="font-size:13px;color:var(--accent3);word-break:break-all;flex:1;"></div>
       </div>
-
-      <!-- Google Custom Search renders here -->
-      <div id="google-search-embed" style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:12px;">
-        <div class="gcse-searchresults-only"></div>
-      </div>
-
-      <!-- Fallback direct links -->
-      <div class="card card-sm">
-        <div class="section-label">ÅPNE DIREKTE I NETTLESER</div>
-        <div class="action-row" id="fallback-search-btns"></div>
-      </div>
+      <!-- Google søk i iframe — lenker åpnes i ny fane av Google selv -->
+      <iframe id="google-iframe"
+        style="width:100%;height:75vh;border:none;border-radius:14px;background:#fff;"
+        sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-top-navigation-by-user-activation">
+      </iframe>
     </div>
 
   </div><!-- /wrap -->
@@ -411,17 +412,7 @@
   // ═══════════════════════════════════════════════════════
   const WORKER_URL = "https://ean.forbruker.app"; // Cloudflare Worker
 
-  // Google Custom Search Engine ID
-  // Opprett på programmablesearchengine.google.com
-  // Lim inn ditt cx= ID her:
-  const GCS_CX = "YOUR_SEARCH_ENGINE_ID";
-
-  const PRICE_ENGINES = [
-    { label:"Google Shopping", icon:"🛒", url: q => `https://www.google.com/search?q=${enc(q+" pris")}&tbm=shop` },
-    { label:"Prisjakt",        icon:"💰", url: q => `https://www.prisjakt.no/search.php?search=${enc(q)}` },
-    { label:"Finn.no",         icon:"🔍", url: q => `https://www.finn.no/bap/forsale/search.html?q=${enc(q)}` },
-    { label:"Komplett",        icon:"📦", url: q => `https://www.komplett.no/search?q=${enc(q)}` },
-  ];
+  // Søk — vanlig Google
 
   const enc = s => encodeURIComponent(s);
 
@@ -559,11 +550,8 @@
   function showSearchResult(query) {
     showView("search");
     document.getElementById("search-query-display").textContent = query;
-    document.getElementById("fallback-search-btns").innerHTML =
-      PRICE_ENGINES.map(e => `
-        <button class="action-btn" onclick="window.open('${e.url(query)}','_blank','noopener')">
-          <span>${e.icon}</span><span>${e.label}</span>
-        </button>`).join("");
+    const url = "https://www.google.com/search?q=" + enc(query) + "&igu=1";
+    document.getElementById("google-iframe").src = url;
   }
 
   // ═══════════════════════════════════════════════════════
@@ -657,12 +645,9 @@
     const confEl = document.getElementById("food-confidence");
     confEl.textContent = "● "+lbl; confEl.className = cls;
 
-    // Price search buttons
+    // Google-søk knapp
     const q = p.searchQuery || p.barcode;
-    document.getElementById("food-search-btns").innerHTML = PRICE_ENGINES.slice(0,2).map(e=>`
-      <button class="action-btn" onclick="window.open('${e.url(q)}','_blank','noopener')">
-        <span>${e.icon}</span><span>${e.label}</span>
-      </button>`).join("");
+    document.getElementById("food-google-btn").onclick = () => showSearchResult(q);
   }
 
   // ═══════════════════════════════════════════════════════
@@ -1066,6 +1051,16 @@
     document.getElementById("manual-input").value = "";
     hideErr("manual-error");
     showView("idle");
+  }
+
+  async function resetAndScan() {
+    stopBarcodeCamera();
+    stopOcrCamera();
+    selectedChips = [];
+    currentBarcode = "";
+    // Gå rett til kameraskanning uten å stoppe på forsiden
+    showView("barcode-cam");
+    await startBarcodeCamera();
   }
 
   // ── Init ────────────────────────────────────────────
