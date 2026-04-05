@@ -303,7 +303,7 @@
           <div class="scan-beam"></div>
         </div>
         <div id="cam-flash"></div>
-        <div class="cam-hint">HOLD STREKKODE I RAMMEN</div>
+        <div class="cam-hint" id="cam-hint-text">SKANNER AUTOMATISK…</div>
       </div>
       <div id="cam-error" class="err-banner hidden"></div>
       <button class="btn btn-secondary" onclick="reset()">← AVBRYT</button>
@@ -478,21 +478,32 @@
 
   // ═══════════════════════════════════════════════════════
   // BARCODE CAMERA
+  // Canvas-loop: snapshot hvert sekund via Blob → ImageBitmap
+  // → BarcodeDetector. Fungerer i Safari (iOS 17+).
   // ═══════════════════════════════════════════════════════
   const hasBarcodeDetector = "BarcodeDetector" in window;
+  let scanCanvas = null;
+  let scanLoopTimer = null;
 
   async function startBarcodeCamera() {
     showView("barcode-cam");
     scanActive = true;
     hideErr("cam-error");
 
+    // Opprett offscreen canvas for snapshot-loop
+    scanCanvas = document.createElement("canvas");
+
     try {
       videoStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode:{ideal:"environment"}, width:{ideal:1280}, height:{ideal:720} },
+        video: {
+          facingMode: { ideal: "environment" },
+          width:  { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
     } catch(e) {
-      showErr("cam-error", "Kameratilgang nektet. Bruk manuell innskriving.");
+      showErr("cam-error", "Kameratilgang nektet — sjekk Innstillinger → Safari → Kamera.");
       return;
     }
 
@@ -500,117 +511,65 @@
     video.srcObject = videoStream;
     await video.play();
 
-    if (hasBarcodeDetector) {
-      const detector = new BarcodeDetector({
-        formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39","qr_code"],
-      });
-      const loop = async () => {
-        if (!scanActive) return;
-        try {
-          const codes = await detector.detect(video);
-          if (codes.length) { onBarcodeFound(codes[0].rawValue); return; }
-        } catch {}
-        requestAnimationFrame(loop);
-      };
-      requestAnimationFrame(loop);
-    } else {
-      // Safari: vis snap-knapp, les strekkode fra stillbilde
-      showErr("cam-error", "Hold strekkoden i rammen og trykk 📸");
-      const wrap = document.getElementById("cam-wrap");
-      if (!document.getElementById("barcode-snap-btn")) {
-        const btn = document.createElement("button");
-        btn.id = "barcode-snap-btn";
-        btn.className = "snap-btn";
-        btn.textContent = "📸";
-        btn.onclick = snapBarcode;
-        wrap.appendChild(btn);
-      }
+    if (!hasBarcodeDetector) {
+      // iOS 16 og eldre: BarcodeDetector finnes ikke
+      showErr("cam-error", "Automatisk skanning krever iOS 17+. Oppgrader iOS eller skriv inn strekkoden manuelt.");
+      return;
     }
-  }
 
-  async function snapBarcode() {
-    // Prøv canvas + BarcodeDetector først
-    const video  = document.getElementById("video");
-    if (video && video.videoWidth > 0 && ("BarcodeDetector" in window)) {
-      const canvas = document.createElement("canvas");
-      canvas.width  = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext("2d").drawImage(video, 0, 0);
-      flashCam("cam-flash", "green");
-      try {
-        const detector = new BarcodeDetector({ formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39"] });
-        const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.95));
-        const img  = await createImageBitmap(blob);
-        const codes = await detector.detect(img);
-        if (codes.length) { onBarcodeFound(codes[0].rawValue); return; }
-        showErr("cam-error", "Ingen strekkode funnet — prøv nærmere eller bedre lys.");
+    const detector = new BarcodeDetector({
+      formats: ["ean_13","ean_8","upc_a","upc_e","code_128","code_39","qr_code"],
+    });
+
+    // ── Canvas-loop: hvert sekund ──────────────────────
+    // Vi bruker setTimeout (ikke rAF) for å spare batteri
+    // og fordi 1 fps er nok for strekkodeskanning
+    async function scanTick() {
+      if (!scanActive) return;
+
+      if (video.readyState < 2 || video.videoWidth === 0) {
+        // Video ikke klar ennå — vent litt
+        scanLoopTimer = setTimeout(scanTick, 200);
         return;
-      } catch(e) {}
-    }
-    // Fallback: bruk native kamera-input (fungerer på alle iPhone)
-    stopBarcodeCamera();
-    useCameraInput();
-  }
-
-  function useCameraInput() {
-    showView("barcode-cam");
-    const wrap = document.getElementById("cam-wrap");
-    // Skjul video, vis instruksjon
-    document.getElementById("video").style.display = "none";
-    wrap.style.background = "#111118";
-    wrap.style.display = "flex";
-    wrap.style.alignItems = "center";
-    wrap.style.justifyContent = "center";
-    wrap.style.flexDirection = "column";
-    wrap.style.gap = "16px";
-    wrap.style.padding = "24px";
-
-    const msg = document.createElement("div");
-    msg.style.cssText = "color:#e8e8f0;font-size:13px;text-align:center;line-height:1.7;";
-    msg.innerHTML = "📷 Ta bilde av strekkoden<br><span style='color:#5a5a7a;font-size:11px;'>Appen din kamera åpnes</span>";
-    wrap.appendChild(msg);
-
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.capture = "environment";
-    input.style.display = "none";
-    input.id = "cam-file-input";
-    document.body.appendChild(input);
-
-    const btn = document.createElement("button");
-    btn.className = "btn btn-green";
-    btn.style.cssText = "width:auto;padding:14px 28px;animation:none;";
-    btn.textContent = "📷 ÅPNE KAMERA";
-    btn.onclick = () => input.click();
-    wrap.appendChild(btn);
-
-    input.onchange = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      if ("BarcodeDetector" in window) {
-        try {
-          const img = await createImageBitmap(file);
-          const detector = new BarcodeDetector({ formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39","qr_code"] });
-          const codes = await detector.detect(img);
-          if (codes.length) { onBarcodeFound(codes[0].rawValue); return; }
-        } catch(e) {}
       }
-      // Ingen BarcodeDetector — vis bildet og la bruker taste EAN manuelt
-      showErr("cam-error", "Strekkodelesing støttes ikke i denne nettleseren. Bruk manuell innskriving.");
-      selectMode("manual");
-      showView("idle");
-    };
-    input.click();
+
+      // Snapshot til canvas
+      scanCanvas.width  = video.videoWidth;
+      scanCanvas.height = video.videoHeight;
+      scanCanvas.getContext("2d").drawImage(video, 0, 0);
+
+      try {
+        // Konverter til Blob → ImageBitmap (Safari-kompatibelt)
+        const blob = await new Promise(res => scanCanvas.toBlob(res, "image/jpeg", 0.92));
+        const bmp  = await createImageBitmap(blob);
+        const codes = await detector.detect(bmp);
+        bmp.close(); // frigir minne
+
+        if (codes.length && scanActive) {
+          onBarcodeFound(codes[0].rawValue);
+          return; // stopp loopen
+        }
+      } catch(e) {
+        // Ignorer enkeltfeil, fortsett scanning
+      }
+
+      // Prøv igjen om 800ms
+      if (scanActive) scanLoopTimer = setTimeout(scanTick, 800);
+    }
+
+    // Start loopen når video faktisk spiller
+    video.addEventListener("playing", () => {
+      scanLoopTimer = setTimeout(scanTick, 500);
+    }, { once: true });
   }
 
   function stopBarcodeCamera() {
     scanActive = false;
-    if (videoStream) { videoStream.getTracks().forEach(t=>t.stop()); videoStream = null; }
+    if (scanLoopTimer) { clearTimeout(scanLoopTimer); scanLoopTimer = null; }
+    if (videoStream)   { videoStream.getTracks().forEach(t=>t.stop()); videoStream = null; }
+    scanCanvas = null;
     const v = document.getElementById("video");
     if (v) v.srcObject = null;
-    const snapBtn = document.getElementById("barcode-snap-btn");
-    if (snapBtn) snapBtn.remove();
   }
 
   function flashCam(id, type) {
@@ -626,7 +585,25 @@
     flashCam("cam-flash", "green");
     setTimeout(stopBarcodeCamera, 400);
     currentBarcode = code;
-    await lookupEAN(code);
+    // Åpne Google-søk direkte med EAN
+    openGoogleSearch(code);
+  }
+
+  function openGoogleSearch(query) {
+    const url = "https://www.google.com/search?q=" + encodeURIComponent(query);
+    window.open(url, "_blank", "noopener");
+    // Vis også resultatsiden internt
+    showSearchResult(query);
+  }
+
+  function showSearchResult(query) {
+    showView("search");
+    document.getElementById("search-query-display").textContent = query;
+    document.getElementById("fallback-search-btns").innerHTML =
+      PRICE_ENGINES.map(e => `
+        <button class="action-btn" onclick="window.open('${e.url(query)}','_blank','noopener')">
+          <span>${e.icon}</span><span>${e.label}</span>
+        </button>`).join("");
   }
 
   // ═══════════════════════════════════════════════════════
