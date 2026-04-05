@@ -505,32 +505,44 @@
 
     const video = document.getElementById("video");
     video.srcObject = videoStream;
-    await video.play();
+    // Ikke kall video.play() manuelt — ZXing håndterer dette
 
-    // ── ZXing @zxing/browser ──────────────────────────
-    // Støtter Safari, looper automatisk fra video-element
+    // ── ZXing BrowserMultiFormatReader ────────────────
     try {
-      // Sjekk at ZXing er lastet
       if (typeof ZXing === "undefined") {
-        showErr("cam-error", "ZXing-biblioteket lastet ikke. Sjekk internettforbindelsen og prøv igjen.");
+        showErr("cam-error", "ZXing lastet ikke — sjekk nettforbindelsen.");
         return;
       }
 
       const hints = new Map();
       hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        ZXing.BarcodeFormat.EAN_13,
+        ZXing.BarcodeFormat.EAN_8,
+        ZXing.BarcodeFormat.UPC_A,
+        ZXing.BarcodeFormat.UPC_E,
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.CODE_39,
+        ZXing.BarcodeFormat.QR_CODE,
+      ]);
 
-      zxingReader = new ZXing.BrowserMultiFormatReader(hints, 300);
+      zxingReader = new ZXing.BrowserMultiFormatReader(hints, 500);
 
-      zxingReader.decodeFromVideoElement(video, (result, err) => {
+      // decodeFromStream er mer pålitelig enn decodeFromVideoElement i Safari
+      const tracks = videoStream.getVideoTracks();
+      await zxingReader.decodeFromStream(videoStream, video, (result, err) => {
         if (!scanActive) return;
         if (result) {
           onBarcodeFound(result.getText());
         }
-        // NotFoundException er forventet når ingen kode i bildet — ignorer
+        // NotFoundException er normalt mellom scans — ignorer
       });
 
     } catch(e) {
-      showErr("cam-error", "Feil: " + (e.message || e) + " — prøv manuell innskriving.");
+      // Feil ved oppstart — vis til bruker
+      if (scanActive) {
+        showErr("cam-error", "Scanner feil: " + (e.message || String(e)));
+      }
     }
   }
 
