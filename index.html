@@ -8,8 +8,8 @@
   <meta name="description" content="Skann produkt eller strekkode og finn prisen" />
   <meta name="theme-color" content="#0a0a0f" />
 
-  <!-- ZXing library: strekkodeskanning inkl. Safari -->
-  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+  <!-- zxing-wasm: WebAssembly strekkodeleser, fungerer i Safari -->
+  <script src="https://cdn.jsdelivr.net/npm/zxing-wasm@2/dist/iife/reader/index.js"></script>
 
   <!-- Tesseract.js: OCR tekstgjenkjenning -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"
@@ -507,48 +507,56 @@
     video.srcObject = videoStream;
     // Ikke kall video.play() manuelt — ZXing håndterer dette
 
-    // ── ZXing BrowserMultiFormatReader ────────────────
+    // ── zxing-wasm: canvas-loop hvert 600ms ──────────
+    // Tar stillbilde fra video → ImageData → readBarcodes
+    // Fungerer i Safari uten BarcodeDetector-API
     try {
-      if (typeof ZXing === "undefined") {
-        showErr("cam-error", "ZXing lastet ikke — sjekk nettforbindelsen.");
+      if (typeof ZXingWASM === "undefined") {
+        showErr("cam-error", "Strekkodebibliotek lastet ikke — sjekk nettforbindelsen.");
         return;
       }
 
-      const hints = new Map();
-      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-        ZXing.BarcodeFormat.EAN_13,
-        ZXing.BarcodeFormat.EAN_8,
-        ZXing.BarcodeFormat.UPC_A,
-        ZXing.BarcodeFormat.UPC_E,
-        ZXing.BarcodeFormat.CODE_128,
-        ZXing.BarcodeFormat.CODE_39,
-        ZXing.BarcodeFormat.QR_CODE,
-      ]);
+      const scanCanvas = document.createElement("canvas");
+      const scanCtx    = scanCanvas.getContext("2d");
 
-      zxingReader = new ZXing.BrowserMultiFormatReader(hints, 500);
-
-      // decodeFromStream er mer pålitelig enn decodeFromVideoElement i Safari
-      const tracks = videoStream.getVideoTracks();
-      await zxingReader.decodeFromStream(videoStream, video, (result, err) => {
+      async function scanTick() {
         if (!scanActive) return;
-        if (result) {
-          onBarcodeFound(result.getText());
+        if (video.readyState < 2 || video.videoWidth === 0) {
+          setTimeout(scanTick, 200);
+          return;
         }
-        // NotFoundException er normalt mellom scans — ignorer
-      });
+
+        scanCanvas.width  = video.videoWidth;
+        scanCanvas.height = video.videoHeight;
+        scanCtx.drawImage(video, 0, 0);
+        const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+
+        try {
+          const results = await ZXingWASM.readBarcodes(imageData, {
+            tryHarder: true,
+            formats: ["EAN-13","EAN-8","UPC-A","UPC-E","Code128","Code39","QRCode"],
+            maxNumberOfSymbols: 1,
+          });
+          if (results.length > 0 && scanActive) {
+            onBarcodeFound(results[0].text);
+            return;
+          }
+        } catch(e) { /* ignorer enkeltfeil */ }
+
+        if (scanActive) setTimeout(scanTick, 600);
+      }
+
+      video.play().catch(() => {});
+      setTimeout(scanTick, 800);
 
     } catch(e) {
-      // Feil ved oppstart — vis til bruker
-      if (scanActive) {
-        showErr("cam-error", "Scanner feil: " + (e.message || String(e)));
-      }
+      if (scanActive) showErr("cam-error", "Feil: " + (e.message || String(e)));
     }
   }
 
   function stopBarcodeCamera() {
     scanActive = false;
-    if (zxingReader) { try { zxingReader.reset(); } catch{} zxingReader = null; }
+    zxingReader = null;
     if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
     const v = document.getElementById("video");
     if (v) v.srcObject = null;
