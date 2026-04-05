@@ -8,9 +8,6 @@
   <meta name="description" content="Skann produkt eller strekkode og finn prisen" />
   <meta name="theme-color" content="#0a0a0f" />
 
-  <!-- ZXing: strekkodeskanning i Safari -->
-<script src="https://unpkg.com/@zxing/browser@0.1.4/umd/index.min.js"></script>
-
   <!-- Tesseract.js: OCR tekstgjenkjenning -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"
     crossorigin="anonymous"></script>
@@ -517,31 +514,44 @@
       };
       requestAnimationFrame(loop);
     } else {
-      // ZXing fallback for Safari
-      try {
-        const hints = new Map();
-        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-          ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
-          ZXing.BarcodeFormat.UPC_A,  ZXing.BarcodeFormat.UPC_E,
-          ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.QR_CODE,
-        ]);
-        zxingReader = new ZXing.BrowserMultiFormatReader(hints, { delayBetweenScanAttempts:300 });
-        zxingReader.decodeFromVideoElement(video, (result) => {
-          if (!scanActive || !result) return;
-          onBarcodeFound(result.getText());
-        });
-      } catch(e) {
-        showErr("cam-error", "Kan ikke skanne. Bruk manuell innskriving.");
+      // Safari: vis snap-knapp, les strekkode fra stillbilde
+      showErr("cam-error", "Hold strekkoden i rammen og trykk 📸");
+      const wrap = document.getElementById("cam-wrap");
+      if (!document.getElementById("barcode-snap-btn")) {
+        const btn = document.createElement("button");
+        btn.id = "barcode-snap-btn";
+        btn.className = "snap-btn";
+        btn.textContent = "📸";
+        btn.onclick = snapBarcode;
+        wrap.appendChild(btn);
       }
     }
   }
 
+  async function snapBarcode() {
+    const video  = document.getElementById("video");
+    const canvas = document.createElement("canvas");
+    canvas.width  = video.videoWidth  || 1280;
+    canvas.height = video.videoHeight || 720;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    flashCam("cam-flash", "green");
+    try {
+      const detector = new BarcodeDetector({ formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39"] });
+      const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.95));
+      const img  = await createImageBitmap(blob);
+      const codes = await detector.detect(img);
+      if (codes.length) { onBarcodeFound(codes[0].rawValue); return; }
+    } catch(e) {}
+    showErr("cam-error", "Ingen strekkode funnet — prøv nærmere eller bruk manuell innskriving.");
+  }
+
   function stopBarcodeCamera() {
     scanActive = false;
-    if (zxingReader) { try { zxingReader.reset(); } catch{} zxingReader = null; }
     if (videoStream) { videoStream.getTracks().forEach(t=>t.stop()); videoStream = null; }
     const v = document.getElementById("video");
     if (v) v.srcObject = null;
+    const snapBtn = document.getElementById("barcode-snap-btn");
+    if (snapBtn) snapBtn.remove();
   }
 
   function flashCam(id, type) {
