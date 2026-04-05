@@ -8,8 +8,8 @@
   <meta name="description" content="Skann produkt eller strekkode og finn prisen" />
   <meta name="theme-color" content="#0a0a0f" />
 
-  <!-- ZXing browser: strekkodeskanning inkl. Safari -->
-  <script src="https://unpkg.com/@zxing/browser@0.1.5"></script>
+  <!-- ZXing library: strekkodeskanning inkl. Safari -->
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 
   <!-- Tesseract.js: OCR tekstgjenkjenning -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"
@@ -511,25 +511,27 @@
     // ── ZXing @zxing/browser ──────────────────────────
     // Støtter Safari, looper automatisk fra video-element
     try {
+      // Sjekk at ZXing er lastet
+      if (typeof ZXing === "undefined") {
+        showErr("cam-error", "ZXing-biblioteket lastet ikke. Sjekk internettforbindelsen og prøv igjen.");
+        return;
+      }
+
       const hints = new Map();
-      hints.set(ZXingBrowser.DecodeHintType.TRY_HARDER, true);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
 
-      zxingReader = new ZXingBrowser.BrowserMultiFormatReader(hints, {
-        delayBetweenScanAttempts: 300,
-        delayBetweenScanSuccess:  500,
-      });
+      zxingReader = new ZXing.BrowserMultiFormatReader(hints, 300);
 
-      zxingReader.decodeFromVideoElement(video, (result, err, controls) => {
-        if (!scanActive) { controls.stop(); return; }
+      zxingReader.decodeFromVideoElement(video, (result, err) => {
+        if (!scanActive) return;
         if (result) {
-          controls.stop();
           onBarcodeFound(result.getText());
         }
-        // err er forventet når ingen kode — ignorer
+        // NotFoundException er forventet når ingen kode i bildet — ignorer
       });
 
     } catch(e) {
-      showErr("cam-error", "Strekkodeskanner feilet: " + e.message + ". Bruk manuell innskriving.");
+      showErr("cam-error", "Feil: " + (e.message || e) + " — prøv manuell innskriving.");
     }
   }
 
