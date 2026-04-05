@@ -480,10 +480,9 @@
   function hideErr(id)       { document.getElementById(id).classList.add("hidden"); }
 
   // ═══════════════════════════════════════════════════════
-  // BARCODE CAMERA — ZXing @zxing/browser
+  // BARCODE CAMERA — ZXing @zxing/library
   // decodeFromVideoElement looper automatisk i Safari
   // ═══════════════════════════════════════════════════════
-  let zxingReader = null;
 
   async function startBarcodeCamera() {
     showView("barcode-cam");
