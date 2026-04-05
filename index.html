@@ -751,6 +751,75 @@
     if (v) v.srcObject = null;
   }
 
+  // ═══════════════════════════════════════════════════════
+  // BILDEFORBEHANDLING — kjøres på canvas før OCR
+  // ═══════════════════════════════════════════════════════
+
+  // Skaler opp til minst TARGET_WIDTH — Tesseract er mye
+  // bedre på større bilder (min 1500px anbefalt)
+  const OCR_TARGET_WIDTH = 2000;
+
+  function preprocessForOcr(srcCanvas) {
+    const sw = srcCanvas.width;
+    const sh = srcCanvas.height;
+
+    // 1. Skaler opp hvis nødvendig
+    const scale = sw < OCR_TARGET_WIDTH ? OCR_TARGET_WIDTH / sw : 1;
+    const w = Math.round(sw * scale);
+    const h = Math.round(sh * scale);
+
+    const out = document.createElement("canvas");
+    out.width  = w;
+    out.height = h;
+    const ctx = out.getContext("2d");
+
+    // Tegn skalert bilde
+    ctx.drawImage(srcCanvas, 0, 0, w, h);
+
+    // 2. Hent pikseldata
+    const img = ctx.getImageData(0, 0, w, h);
+    const d   = img.data;
+
+    // 3. Gråtone + kontrast + adaptiv terskel
+    // Beregn gjennomsnittsluminans for adaptiv terskel
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      sum += 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+    }
+    const avgLum = sum / (d.length / 4);
+
+    // Terskelverdi: litt under snittet for å beholde mørk tekst
+    const threshold = Math.min(avgLum * 1.1, 200);
+
+    for (let i = 0; i < d.length; i += 4) {
+      // Gråtone
+      const lum = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+
+      // Kontrast boost (+40%)
+      const boosted = ((lum - 128) * 1.4) + 128;
+
+      // Binær terskel: svart eller hvit
+      const bin = boosted < threshold ? 0 : 255;
+
+      d[i] = d[i+1] = d[i+2] = bin;
+      d[i+3] = 255;
+    }
+
+    ctx.putImageData(img, 0, 0);
+
+    // 4. Legg til liten hvit kant (hjelper Tesseract med kantdeteksjon)
+    const padded = document.createElement("canvas");
+    const pad = 20;
+    padded.width  = w + pad*2;
+    padded.height = h + pad*2;
+    const pctx = padded.getContext("2d");
+    pctx.fillStyle = "#ffffff";
+    pctx.fillRect(0, 0, padded.width, padded.height);
+    pctx.drawImage(out, pad, pad);
+
+    return padded;
+  }
+
   // ── Snap photo and run OCR ───────────────────────────
   async function snapPhoto() {
     // Flash
@@ -758,7 +827,7 @@
     f.style.background = "rgba(255,255,255,.6)";
     setTimeout(()=>f.style.background="", 200);
 
-    // Capture frame to canvas
+    // Capture frame til snap-canvas (vises som preview)
     const video  = document.getElementById("ocr-video");
     const canvas = document.getElementById("snap-canvas");
     canvas.width  = video.videoWidth;
@@ -769,78 +838,165 @@
     stopOcrCamera();
     showView("ocr-processing");
 
-    // Run Tesseract OCR
+    // Forbehandle for OCR (separat canvas, ikke preview)
+    const processed = preprocessForOcr(canvas);
+
+    const setStatus = (msg, pct) => {
+      document.getElementById("ocr-status").textContent = msg;
+      if (pct !== undefined)
+        document.getElementById("ocr-progress-bar").style.width = pct + "%";
+    };
+
     try {
+      setStatus("Laster OCR-motor…", 5);
+
       const worker = await Tesseract.createWorker("eng+nor", 1, {
         logger: m => {
           if (m.status === "recognizing text") {
-            document.getElementById("ocr-progress-bar").style.width = (m.progress*100).toFixed(0)+"%";
-            document.getElementById("ocr-status").textContent = "Analyserer… "+Math.round(m.progress*100)+"%";
-          } else {
-            document.getElementById("ocr-status").textContent = m.status;
+            const pct = Math.round(m.progress * 80) + 15;
+            setStatus("Leser tekst… " + pct + "%", pct);
+          } else if (m.status === "loading tesseract core") {
+            setStatus("Laster OCR-kjerne…", 8);
+          } else if (m.status === "initializing tesseract") {
+            setStatus("Initialiserer…", 12);
           }
         },
       });
 
-      const { data } = await worker.recognize(canvas);
+      // PSM 11: sparse text — best for produktetiketter
+      // PSM 3: standard — best for sammenhengende tekst
+      // Vi kjører begge og slår sammen
+      setStatus("Analyserer (pass 1/2)…", 20);
+      await worker.setParameters({ tessedit_pageseg_mode: "11" });
+      const { data: d1 } = await worker.recognize(processed);
+
+      setStatus("Analyserer (pass 2/2)…", 60);
+      await worker.setParameters({ tessedit_pageseg_mode: "3" });
+      const { data: d2 } = await worker.recognize(processed);
+
       await worker.terminate();
 
-      processOcrText(data.text, data.words || []);
+      // Slå sammen ord fra begge pass, ta høyeste confidence per ord
+      const allWords = mergeOcrResults(d1.words || [], d2.words || []);
+
+      processOcrText(d1.text + "\n" + d2.text, allWords);
+
     } catch(e) {
-      alert("OCR feilet. Prøv igjen eller skriv inn manuelt.");
-      reset();
+      console.error("OCR error:", e);
+      setStatus("OCR feilet — prøv igjen", 0);
+      setTimeout(() => {
+        showView("ocr-chips");
+        document.getElementById("chips-wrap").innerHTML =
+          `<div style="color:var(--danger);font-size:12px;">
+            Kunne ikke lese tekst. Prøv med bedre lys eller høyere kontrast.
+           </div>
+           <button class="btn btn-secondary" style="margin-top:12px;" onclick="startOcrCamera()">
+             Prøv igjen
+           </button>`;
+        document.getElementById("selected-query-wrap").classList.add("hidden");
+        document.getElementById("ocr-action-btns").classList.add("hidden");
+      }, 1500);
     }
+  }
+
+  // Slå sammen to OCR-resultater, behold høyeste confidence
+  function mergeOcrResults(words1, words2) {
+    const map = new Map();
+    [...words1, ...words2].forEach(w => {
+      const key = w.text.toLowerCase().trim();
+      if (!map.has(key) || w.confidence > map.get(key).confidence) {
+        map.set(key, w);
+      }
+    });
+    return [...map.values()];
   }
 
   // ── Process OCR output into chips ───────────────────
   function processOcrText(rawText, words) {
-    // Extract meaningful tokens
-    const lines  = rawText.split("\n").map(l=>l.trim()).filter(Boolean);
-    const tokens = new Set();
-
-    // Add full lines (if short enough to be product names)
-    lines.forEach(line => {
-      if (line.length >= 2 && line.length <= 60) tokens.add(line);
-    });
-
-    // Add individual words ≥ 3 chars, filter noise
-    words.forEach(w => {
-      const t = w.text.trim().replace(/[^a-zA-Z0-9æøåÆØÅ\-\.]/g,"");
-      if (t.length >= 3 && w.confidence > 60) tokens.add(t);
-    });
-
-    // Detect EAN-like numbers
-    const eanMatches = rawText.match(/\b\d{8,14}\b/g) || [];
-
     showView("ocr-chips");
     selectedChips = [];
 
     const wrap = document.getElementById("chips-wrap");
     wrap.innerHTML = "";
 
-    // EAN chips first
-    eanMatches.forEach(ean => {
-      const btn = document.createElement("button");
-      btn.className = "chip ean-chip";
-      btn.textContent = "▦ " + ean;
-      btn.dataset.value = ean;
-      btn.dataset.isEan = "true";
-      btn.onclick = () => toggleChip(btn, ean, true);
-      wrap.appendChild(btn);
-    });
+    // ── EAN: tall med 8-14 siffer ──
+    const eanMatches = [...new Set(rawText.match(/\b\d{8,14}\b/g) || [])];
 
-    // Text chips
-    [...tokens].slice(0, 24).forEach(tok => {
+    // ── Modellnummer: alfanumerisk med bindestrek, f.eks. "WH-1000XM5" ──
+    const modelMatches = [...new Set(
+      (rawText.match(/\b[A-Z]{1,4}[-_]?\d{3,}[A-Z0-9\-]*\b/g) || [])
+      .filter(m => m.length >= 4)
+    )];
+
+    // ── Ord med høy confidence, sortert etter størrelse (store ord = viktigere) ──
+    const highConfWords = words
+      .filter(w => {
+        const t = w.text.trim();
+        return (
+          w.confidence >= 70 &&
+          t.length >= 3 &&
+          /[a-zA-ZæøåÆØÅ]/.test(t) &&       // må inneholde bokstav
+          !/^[\d\s\W]+$/.test(t)            // ikke bare tall/tegn
+        );
+      })
+      .sort((a, b) => {
+        // Sorter: høy confidence + stor skriftstørrelse øverst
+        const aScore = a.confidence + (a.bbox ? (a.bbox.y1 - a.bbox.y0) * 0.5 : 0);
+        const bScore = b.confidence + (b.bbox ? (b.bbox.y1 - b.bbox.y0) * 0.5 : 0);
+        return bScore - aScore;
+      });
+
+    // ── Linjer som sannsynligvis er produktnavn (kort, stor font = tidlig i bilde) ──
+    const lines = rawText.split("\n")
+      .map(l => l.trim())
+      .filter(l => l.length >= 3 && l.length <= 50 && /[a-zA-ZæøåÆØÅ]/.test(l));
+
+    // Deduplisert samling av tokens å vise
+    const seen = new Set();
+    const addChip = (text, type) => {
+      const key = text.toLowerCase().trim();
+      if (seen.has(key) || text.length < 2) return;
+      seen.add(key);
+
       const btn = document.createElement("button");
-      btn.className = "chip";
-      btn.textContent = tok;
-      btn.dataset.value = tok;
-      btn.onclick = () => toggleChip(btn, tok, false);
+      btn.className = type === "ean"   ? "chip ean-chip" :
+                      type === "model" ? "chip" :
+                      type === "line"  ? "chip" : "chip";
+
+      if (type === "ean")   btn.textContent = "▦ " + text;
+      else if (type === "model") btn.textContent = "⌗ " + text;
+      else btn.textContent = text;
+
+      // Stil etter type
+      if (type === "model") {
+        btn.style.borderColor = "rgba(255,159,0,.4)";
+        btn.style.color = "var(--accent3)";
+      } else if (type === "line") {
+        btn.style.fontWeight = "600";
+      }
+
+      btn.onclick = () => toggleChip(btn, text, type === "ean");
       wrap.appendChild(btn);
-    });
+    };
+
+    // 1. EAN-koder øverst
+    eanMatches.forEach(e => addChip(e, "ean"));
+
+    // 2. Modellnummer
+    modelMatches.forEach(m => addChip(m, "model"));
+
+    // 3. Korte linjer (sannsynlige produktnavn)
+    lines.slice(0, 6).forEach(l => addChip(l, "line"));
+
+    // 4. Enkeltord med høy confidence
+    highConfWords.slice(0, 16).forEach(w => addChip(w.text.trim(), "word"));
 
     if (wrap.children.length === 0) {
-      wrap.innerHTML = `<div style="color:var(--muted);font-size:12px;">Ingen tekst funnet — prøv igjen med bedre lys.</div>`;
+      wrap.innerHTML = `
+        <div style="color:var(--muted);font-size:12px;line-height:1.7;">
+          Ingen tekst gjenkjent.<br>
+          Tips: godt lys, hold telefonen stille, og sørg for at teksten fyller bildet.
+        </div>`;
     }
 
     document.getElementById("selected-query-wrap").classList.add("hidden");
