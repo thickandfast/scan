@@ -1,15 +1,18 @@
 // ═══════════════════════════════════════════════════════════════
 // prisscanner-worker.js
-// Cloudflare Worker med KV-cache for EAN-oppslag
+// Cloudflare Worker
 //
-// Flyt:
-//   1. Sjekk KV-cache → returner hvis treff
-//   2. Spør Open Food Facts → lagre i KV hvis treff
-//   3. Spør Claude som siste utvei → lagre permanent i KV
+// Endepunkter:
+//   GET  /lookup?ean=...   → KV-cache → OFF → svar
+//   POST /identify         → Claude Haiku vision → KV-cache → svar
+//   GET  /food?name=...    → Matvaretabell fuzzy-søk
 //
-// Miljøvariabler som må settes i Cloudflare:
-//   - ANTHROPIC_API_KEY  (secret)
-//   - EAN_CACHE          (KV namespace binding)
+// Miljøvariabler (Cloudflare secrets/bindings):
+//   - ANTHROPIC_API_KEY   (secret)
+//   - EAN_CACHE           (KV namespace binding)
+//   - FOOD_DATA           (KV namespace binding — matvaretabell)
+//
+// Scheduled trigger: månedlig oppdatering av matvaretabell
 // ═══════════════════════════════════════════════════════════════
 
 const CORS_HEADERS = (origin) => ({
@@ -18,6 +21,129 @@ const CORS_HEADERS = (origin) => ({
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 });
+
+// ── Matvaretabell — månedlig oppdatering ─────────────────────
+async function updateMatvaretabell(env) {
+  try {
+    const res = await fetch("https://www.matvaretabellen.no/alle-matvarer.xlsx", {
+      headers: { "User-Agent": "forbruker.app/1.0" },
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+
+    // Excel-parsing i Worker er ikke mulig direkte —
+    // vi bruker JSON-API-en til matvaretabellen i stedet
+    // Hent JSON-datasettet som Mattilsynet publiserer
+    const jsonRes = await fetch("https://www.matvaretabellen.no/api/nb/foods.json", {
+      headers: { "User-Agent": "forbruker.app/1.0" },
+    });
+
+    if (!jsonRes.ok) throw new Error("JSON API HTTP " + jsonRes.status);
+    const foods = await jsonRes.json();
+
+    // Lagre hele datasettet som én KV-verdi
+    // foods er et array av matvare-objekter
+    await env.FOOD_DATA.put("all_foods", JSON.stringify(foods), {
+      expirationTtl: 60 * 60 * 24 * 40, // 40 dager
+    });
+
+    // Bygg også søkeindeks: navn (lowercase) → id
+    const index = {};
+    for (const food of foods) {
+      const key = (food.name?.nb || food.name || "").toLowerCase().trim();
+      if (key) index[key] = food.id || food.foodId;
+    }
+    await env.FOOD_DATA.put("search_index", JSON.stringify(index), {
+      expirationTtl: 60 * 60 * 24 * 40,
+    });
+
+    return { updated: foods.length };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+// ── Matvaretabell — fuzzy-søk på navn ────────────────────────
+async function searchFoodData(name, env) {
+  try {
+    const indexRaw = await env.FOOD_DATA.get("search_index");
+    if (!indexRaw) return null;
+    const index = JSON.parse(indexRaw);
+
+    const query = name.toLowerCase().trim();
+
+    // 1. Eksakt treff
+    if (index[query]) {
+      return await getFoodById(index[query], env);
+    }
+
+    // 2. Starter med søkeord
+    const startsWithKey = Object.keys(index).find(k => k.startsWith(query));
+    if (startsWithKey) {
+      return await getFoodById(index[startsWithKey], env);
+    }
+
+    // 3. Inneholder søkeord
+    const containsKey = Object.keys(index).find(k => k.includes(query));
+    if (containsKey) {
+      return await getFoodById(index[containsKey], env);
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function getFoodById(id, env) {
+  try {
+    const allRaw = await env.FOOD_DATA.get("all_foods");
+    if (!allRaw) return null;
+    const all = JSON.parse(allRaw);
+    const food = all.find(f => (f.id || f.foodId) === id);
+    if (!food) return null;
+    return formatFoodData(food);
+  } catch {
+    return null;
+  }
+}
+
+function formatFoodData(food) {
+  // Normaliser felt fra Matvaretabellen-formatet
+  const name = food.name?.nb || food.name || null;
+  const nutrients = food.nutrients || food.constituents || {};
+
+  // Hent nøkkelnæringsstoffer per 100g
+  const get = (keys) => {
+    for (const k of keys) {
+      const v = nutrients[k];
+      if (v !== undefined && v !== null) return parseFloat(v) || null;
+    }
+    return null;
+  };
+
+  return {
+    name,
+    category: food.foodGroup?.name?.nb || food.category || null,
+    per100g: {
+      energyKcal: get(["Energi (kcal)", "energy_kcal", "energiKcal", "Kcal"]),
+      protein:    get(["Protein", "protein"]),
+      fat:        get(["Fett", "fat"]),
+      carbs:      get(["Karbohydrat", "carbohydrates", "karbohydrater"]),
+      fiber:      get(["Kostfiber", "fiber", "kostfiber"]),
+      salt:       get(["Salt", "salt"]),
+      sugar:      get(["Sukkerarter", "sugars", "sukker"]),
+    },
+    source: "Matvaretabellen / Helsedirektoratet & Mattilsynet",
+    note: "Verdiene gjelder matvaregruppen, ikke nødvendigvis dette eksakte produktet.",
+  };
+}
+
+// ── Scheduled: månedlig matvaretabell-oppdatering ────────────
+export const scheduled = {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(updateMatvaretabell(env));
+  },
+};
 
 export default {
   async fetch(request, env) {
@@ -33,6 +159,34 @@ export default {
     // ── /identify — Claude vision på produktbilde ───────────
     if (request.method === "POST" && url.pathname.endsWith("/identify")) {
       return handleIdentify(request, env, origin);
+    }
+
+    // ── /food?name=... — matvaretabell-søk ──────────────────
+    if (request.method === "GET" && url.pathname.endsWith("/food")) {
+      const name = url.searchParams.get("name")?.trim();
+      if (!name) {
+        return new Response(JSON.stringify({ error: "Mangler name" }), {
+          status: 400, headers: CORS_HEADERS(origin),
+        });
+      }
+      // Sjekk om FOOD_DATA er satt opp
+      if (!env.FOOD_DATA) {
+        return new Response(JSON.stringify({ error: "FOOD_DATA KV ikke konfigurert" }), {
+          status: 503, headers: CORS_HEADERS(origin),
+        });
+      }
+      const food = await searchFoodData(name, env);
+      return new Response(JSON.stringify(food || { found: false }), {
+        headers: CORS_HEADERS(origin),
+      });
+    }
+
+    // ── /admin/update-food — manuell trigger av matvaretabell ──
+    if (request.method === "GET" && url.pathname.endsWith("/admin/update-food")) {
+      const result = await updateMatvaretabell(env);
+      return new Response(JSON.stringify(result), {
+        headers: CORS_HEADERS(origin),
+      });
     }
 
     // ── Kun GET for /lookup ──────────────────────────────────
