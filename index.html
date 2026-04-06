@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="no">
 <head>
@@ -220,6 +221,26 @@
     @supports (padding-bottom: env(safe-area-inset-bottom)) {
       body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
     }
+
+    /* ── Næringstabell ── */
+    .nutrition-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 12px; margin-top: 12px;
+    }
+    .nutrition-table tr { border-bottom: 1px solid var(--border); }
+    .nutrition-table tr:last-child { border-bottom: none; }
+    .nutrition-table td { padding: 6px 0; color: var(--text); }
+    .nutrition-table td:last-child { text-align: right; color: var(--muted); }
+    .nutrition-table .nut-header td {
+      font-size: 10px; letter-spacing: 1.5px;
+      color: var(--muted); padding-top: 4px; padding-bottom: 8px;
+    }
+    .nutrition-source {
+      font-size: 10px; color: var(--muted);
+      margin-top: 8px; line-height: 1.6;
+      padding: 8px 10px;
+      background: var(--surface2); border-radius: 6px;
+    }
   </style>
 
 </head>
@@ -403,6 +424,13 @@
           <div style="color:var(--muted);">EAN: <span style="color:var(--text);" id="food-ean">—</span></div>
           <div id="food-confidence"></div>
         </div>
+      </div>
+
+      <!-- Næringstabell fra Matvaretabellen (kun matvarer) -->
+      <div id="nutrition-card" class="card card-sm hidden">
+        <div class="section-label">NÆRINGSINNHOLD PER 100G</div>
+        <table class="nutrition-table" id="nutrition-table"></table>
+        <div class="nutrition-source" id="nutrition-source"></div>
       </div>
 
       <div class="card card-sm">
@@ -666,9 +694,75 @@
     const confEl = document.getElementById("food-confidence");
     confEl.textContent = "● "+lbl; confEl.className = cls;
 
+    // Bygg søkeord med vekt/størrelse hvis tilgjengelig (fase 3)
+    let searchQuery = p.searchQuery || p.barcode;
+    if (p.quantity) {
+      // Legg til vekt/størrelse i søket for bedre treff
+      searchQuery = searchQuery + " " + p.quantity;
+    }
+
     // Google-søk knapp
-    const q = p.searchQuery || p.barcode;
-    document.getElementById("food-google-btn").onclick = () => showSearchResult(q);
+    document.getElementById("food-google-btn").onclick = () => showSearchResult(searchQuery);
+
+    // Prøv å hente næringstabell hvis det er en matvare
+    const nutritionCard = document.getElementById("nutrition-card");
+    nutritionCard.classList.add("hidden");
+    if (p.name && (p.badges?.length || p.category)) {
+      // Ser ut som matvare — prøv matvaretabell
+      fetchNutritionData(p.name, p.brand, p.category);
+    }
+  }
+
+  async function fetchNutritionData(name, brand, category) {
+    // Prøv ulike søkeord: produktnavn, generisk kategori
+    const queries = [name, brand, category].filter(Boolean);
+    for (const q of queries) {
+      try {
+        const res = await fetch(`${WORKER_URL}/food?name=${enc(q)}`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (data && data.per100g && data.name) {
+          renderNutritionTable(data);
+          return;
+        }
+      } catch {}
+    }
+    // Ingen treff — hold skjult
+  }
+
+  function renderNutritionTable(food) {
+    const card  = document.getElementById("nutrition-card");
+    const table = document.getElementById("nutrition-table");
+    const src   = document.getElementById("nutrition-source");
+
+    const rows = [
+      ["Energi",       food.per100g.energyKcal, "kcal"],
+      ["Protein",      food.per100g.protein,     "g"],
+      ["Fett",         food.per100g.fat,          "g"],
+      ["Karbohydrat",  food.per100g.carbs,        "g"],
+      ["— herav sukker", food.per100g.sugar,      "g"],
+      ["Kostfiber",    food.per100g.fiber,        "g"],
+      ["Salt",         food.per100g.salt,         "g"],
+    ].filter(([,v]) => v !== null && v !== undefined);
+
+    if (rows.length === 0) return;
+
+    table.innerHTML = `
+      <tr class="nut-header">
+        <td>NÆRINGSSTOFF</td>
+        <td>PER 100G</td>
+      </tr>
+      ${rows.map(([label, val, unit]) =>
+        `<tr><td>${label}</td><td>${val.toFixed(1)} ${unit}</td></tr>`
+      ).join("")}
+    `;
+
+    src.innerHTML = `
+      ⚠️ ${food.note}<br>
+      Kilde: <strong>${food.source}</strong>
+    `;
+
+    card.classList.remove("hidden");
   }
 
   // ═══════════════════════════════════════════════════════
