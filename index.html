@@ -748,11 +748,10 @@
     // Google-søk knapp
     document.getElementById("food-google-btn").onclick = () => showSearchResult(searchQuery);
 
-    // Prøv å hente næringstabell hvis det er en matvare
+    // Prøv å hente næringstabell for alle produkter med navn
     const nutritionCard = document.getElementById("nutrition-card");
     nutritionCard.classList.add("hidden");
-    if (p.name && (p.badges?.length || p.category)) {
-      // Ser ut som matvare — prøv matvaretabell
+    if (p.name) {
       fetchNutritionData(p.name, p.brand, p.category);
     }
   }
