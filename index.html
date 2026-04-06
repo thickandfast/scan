@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="no">
 <head>
@@ -356,6 +355,28 @@
       </div>
     </div>
 
+    <!-- ══ VIS FORSIDEN (ukjent EAN) ══ -->
+    <div id="view-show-front" class="hidden fade-up">
+      <div class="card" style="text-align:center;">
+        <div style="font-size:52px;margin-bottom:16px;">📦</div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:19px;margin-bottom:10px;color:var(--text);">
+          Strekkoden er lest!
+        </div>
+        <div id="show-front-ean" style="font-size:12px;color:var(--accent);letter-spacing:1px;margin-bottom:16px;"></div>
+        <div style="color:var(--muted);font-size:14px;line-height:1.8;margin-bottom:28px;padding:0 8px;">
+          Vi fant ikke dette produktet i databasen.<br>
+          Kan du vise meg <strong style="color:var(--text);">forsiden av produktet</strong> slik at jeg kan se produsent og produktnavn?
+        </div>
+        <button class="btn btn-green" onclick="startFrontPhotoCapture()">
+          📷 TA BILDE AV FORSIDEN
+        </button>
+        <button class="btn btn-secondary" style="margin-top:10px;" onclick="skipFrontPhoto()">
+          Hopp over — søk på strekkode
+        </button>
+        <button class="btn btn-ghost" onclick="resetAndScan()">← Skann nytt produkt</button>
+      </div>
+    </div>
+
     <!-- ══ LOADING ══ -->
     <div id="view-loading" class="hidden" style="text-align:center;padding:56px 0;">
       <div class="spinner"></div>
@@ -425,7 +446,7 @@
   let currentBarcode = "";
 
   // ── Views ────────────────────────────────────────────
-  const ALL_VIEWS = ["idle","barcode-cam","ocr-cam","ocr-processing","ocr-chips","loading","food-result","search"];
+  const ALL_VIEWS = ["idle","barcode-cam","ocr-cam","ocr-processing","ocr-chips","loading","food-result","search","show-front"];
   function showView(name) {
     ALL_VIEWS.forEach(v => {
       document.getElementById("view-"+v).classList.toggle("hidden", v !== name);
@@ -609,8 +630,8 @@
     }
 
     if (!product || !product.name) {
-      // Ikke funnet i OFF — gå direkte til prissøk
-      showSearchResult(barcode);
+      // Ikke funnet i OFF — be bruker vise forsiden
+      showFrontPhotoPrompt(barcode);
       return;
     }
 
@@ -648,6 +669,87 @@
     // Google-søk knapp
     const q = p.searchQuery || p.barcode;
     document.getElementById("food-google-btn").onclick = () => showSearchResult(q);
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // UKJENT EAN — be bruker ta bilde av forsiden
+  // ═══════════════════════════════════════════════════════
+  function showFrontPhotoPrompt(barcode) {
+    currentBarcode = barcode;
+    document.getElementById("show-front-ean").textContent = "EAN: " + barcode;
+    showView("show-front");
+  }
+
+  function skipFrontPhoto() {
+    // Hopp over bilde — søk direkte på EAN
+    showSearchResult(currentBarcode);
+  }
+
+  async function startFrontPhotoCapture() {
+    // Bruk samme OCR-kamera, men med Claude Haiku på bildet
+    // i stedet for Tesseract
+    showView("ocr-cam");
+    // Marker at dette er en "identify"-session, ikke vanlig OCR
+    window._identifyMode = true;
+    try {
+      ocrStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode:{ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080} },
+        audio: false,
+      });
+      const v = document.getElementById("ocr-video");
+      v.srcObject = ocrStream;
+      await v.play();
+      // Oppdater hint-tekst
+      const hint = document.querySelector("#ocr-cam-wrap div[style*='bottom:14px']");
+      if (hint) hint.textContent = "HOLD FORSIDEN MOT KAMERA";
+    } catch(e) {
+      alert("Kameratilgang nektet.");
+      showView("show-front");
+    }
+  }
+
+  async function identifyProductWithClaude(canvas) {
+    // Konverter canvas til base64 JPEG
+    const base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+
+    showView("loading");
+    document.getElementById("loading-code").textContent = "Analyserer produkt…";
+    document.getElementById("loading-step").textContent = "Claude leser forsiden…";
+
+    try {
+      const res = await fetch(`${WORKER_URL}/identify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ean: currentBarcode, image: base64 }),
+      });
+
+      if (!res.ok) throw new Error("Worker feilet");
+      const data = await res.json();
+
+      if (data.name) {
+        // Fant produktnavn — vis bekreftelse og søk
+        const product = {
+          barcode: currentBarcode,
+          name: data.name,
+          brand: data.brand || null,
+          category: data.category || null,
+          emoji: "📦",
+          searchQuery: data.searchQuery || [data.brand, data.name].filter(Boolean).join(" "),
+          description: data.description || null,
+          confidence: "medium",
+          badges: [],
+          _source: "claude-vision",
+        };
+        renderFoodResult(product);
+        showView("food-result");
+      } else {
+        // Claude fant heller ikke noe — søk på EAN
+        showSearchResult(currentBarcode);
+      }
+    } catch(e) {
+      // Feil — fall tilbake til EAN-søk
+      showSearchResult(currentBarcode);
+    }
   }
 
   // ═══════════════════════════════════════════════════════
@@ -760,6 +862,14 @@
     ctx.drawImage(video, 0, 0);
 
     stopOcrCamera();
+
+    // Hvis vi er i identifiseringsmodus → send til Claude
+    if (window._identifyMode) {
+      window._identifyMode = false;
+      await identifyProductWithClaude(canvas);
+      return;
+    }
+
     showView("ocr-processing");
 
     // Forbehandle for OCR (separat canvas, ikke preview)
