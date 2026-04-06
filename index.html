@@ -28,13 +28,13 @@
       --accent: #00ff88;
       --accent2: #0099ff;
       --accent3: #ff9f00;
-      --muted: #9090b0;
+      --muted: #aaaacc;
       --text: #f0f0fa;
       --danger: #ff3366;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; overscroll-behavior: none; font-size: 15px; }
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; overscroll-behavior: none; font-size: 16px; }
     body { display: flex; flex-direction: column; align-items: center; padding: 0 16px 64px; min-height: 100%; }
 
     @keyframes scanline {
@@ -112,7 +112,7 @@
     /* ── Camera ── */
     #cam-wrap {
       position: relative; border-radius: 16px; overflow: hidden;
-      background: #000; aspect-ratio: 4/3; margin-bottom: 12px;
+      background: #000; aspect-ratio: 3/4; margin-bottom: 12px;
     }
     #video { width:100%; height:100%; object-fit:cover; display:block; }
     .cam-overlay {
@@ -271,17 +271,41 @@
     <!-- ══ IDLE ══ -->
     <div id="view-idle" class="fade-up">
       <div class="card" style="text-align:center;">
-        <div style="font-size:54px;margin-bottom:14px">▦</div>
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:20px;margin-bottom:8px">
+        <div style="margin-bottom:18px;display:flex;justify-content:center;">
+          <svg width="120" height="60" viewBox="0 0 120 60" fill="none">
+            <rect x="0"   y="0" width="6"  height="60" fill="var(--text)"/>
+            <rect x="9"   y="0" width="3"  height="60" fill="var(--text)"/>
+            <rect x="15"  y="0" width="6"  height="60" fill="var(--text)"/>
+            <rect x="24"  y="0" width="3"  height="60" fill="var(--text)"/>
+            <rect x="30"  y="0" width="9"  height="60" fill="var(--text)"/>
+            <rect x="42"  y="0" width="3"  height="60" fill="var(--text)"/>
+            <rect x="48"  y="0" width="6"  height="60" fill="var(--text)"/>
+            <rect x="57"  y="0" width="3"  height="60" fill="var(--text)"/>
+            <rect x="63"  y="0" width="9"  height="60" fill="var(--text)"/>
+            <rect x="75"  y="0" width="3"  height="60" fill="var(--text)"/>
+            <rect x="81"  y="0" width="6"  height="60" fill="var(--text)"/>
+            <rect x="90"  y="0" width="3"  height="60" fill="var(--text)"/>
+            <rect x="96"  y="0" width="9"  height="60" fill="var(--text)"/>
+            <rect x="108" y="0" width="3"  height="60" fill="var(--text)"/>
+            <rect x="114" y="0" width="6"  height="60" fill="var(--text)"/>
+          </svg>
+        </div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:22px;margin-bottom:10px;color:var(--text);">
           Skann strekkode
         </div>
-        <div style="color:var(--muted);font-size:12px;line-height:1.9;margin-bottom:28px">
+        <div style="color:var(--muted);font-size:14px;line-height:1.9;margin-bottom:32px;">
           Hold kamera mot EAN-strekkode.<br>
           Finner produktinfo og priser automatisk.
         </div>
-        <button class="btn btn-green" onclick="startBarcodeCamera()">📷 START SKANNER</button>
-        <button class="btn btn-secondary" style="margin-top:10px;" onclick="startOcrCamera()">🔤 Skann tekst / logo</button>
-        <button class="btn btn-ghost" onclick="showManualInput()">✎ Skriv inn manuelt</button>
+        <button class="btn btn-green" onclick="startBarcodeCamera()">
+          <svg style="vertical-align:middle;margin-right:8px;" width="22" height="18" viewBox="0 0 24 20" fill="none">
+            <rect x="1" y="5" width="22" height="15" rx="3" stroke="#000" stroke-width="2" fill="none"/>
+            <circle cx="12" cy="12" r="4" stroke="#000" stroke-width="2" fill="none"/>
+            <path d="M8 5 L9.5 2 H14.5 L16 5" stroke="#000" stroke-width="2" fill="none" stroke-linejoin="round"/>
+            <circle cx="19" cy="8" r="1" fill="#000"/>
+          </svg>
+          START SKANNER
+        </button>
       </div>
 
       <!-- Manuell innskriving (skjult som standard) -->
@@ -332,7 +356,14 @@
         </div>
         <div id="ocr-cam-flash"></div>
         <div style="position:absolute;bottom:14px;left:0;right:0;text-align:center;font-size:10px;color:rgba(255,255,255,.6);letter-spacing:1.5px;">HOLD PRODUKTET STABILT</div>
-        <button class="snap-btn" onclick="snapPhoto()">📸</button>
+        <button class="snap-btn" onclick="snapPhoto()" style="background:#fff;border:3px solid #000;display:flex;align-items:center;justify-content:center;">
+          <svg width="28" height="24" viewBox="0 0 24 20" fill="none">
+            <rect x="1" y="4" width="22" height="15" rx="3" stroke="#000" stroke-width="2.5" fill="none"/>
+            <circle cx="12" cy="11.5" r="4" stroke="#000" stroke-width="2.5" fill="none"/>
+            <path d="M8 4 L9.5 1.5 H14.5 L16 4" stroke="#000" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
+            <circle cx="19" cy="7" r="1.2" fill="#000"/>
+          </svg>
+        </button>
       </div>
       <button class="btn btn-secondary" onclick="reset()">← AVBRYT</button>
     </div>
@@ -443,7 +474,7 @@
     <!-- ══ GOOGLE SEARCH RESULT ══ -->
     <div id="view-search" class="hidden fade-up">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-        <button class="btn btn-secondary" style="width:auto;padding:10px 16px;margin-top:0;" onclick="resetAndScan()">←</button>
+        <button class="btn btn-secondary" style="width:auto;padding:10px 16px;margin-top:0;" onclick="backFromSearch()">←</button>
         <div id="search-query-display" style="font-size:13px;color:var(--accent3);word-break:break-all;flex:1;"></div>
       </div>
       <!-- Google søk i iframe — lenker åpnes i ny fane av Google selv -->
@@ -596,11 +627,24 @@
     await lookupEAN(code);
   }
 
+  let lastViewBeforeSearch = null;
+
   function showSearchResult(query) {
+    // Husk hvilken view vi kom fra
+    lastViewBeforeSearch = document.querySelector('.wrap > div:not(.hidden)')?.id || null;
     showView("search");
     document.getElementById("search-query-display").textContent = query;
     const url = "https://www.google.com/search?q=" + enc(query) + "&igu=1";
     document.getElementById("google-iframe").src = url;
+  }
+
+  function backFromSearch() {
+    // Gå tilbake til food-result hvis vi kom derfra, ellers ny skanning
+    if (lastViewBeforeSearch === "view-food-result") {
+      showView("food-result");
+    } else {
+      resetAndScan();
+    }
   }
 
   // ═══════════════════════════════════════════════════════
