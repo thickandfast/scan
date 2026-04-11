@@ -745,22 +745,23 @@
     const confEl = document.getElementById("food-confidence");
     confEl.textContent = "● "+lbl; confEl.className = cls;
 
-    // Bygg søkeord med vekt/størrelse hvis tilgjengelig (fase 3)
+    // Bygg søkeord med vekt/størrelse
     let searchQuery = p.searchQuery || p.barcode;
-    if (p.quantity) {
-      // Legg til vekt/størrelse i søket for bedre treff
-      searchQuery = searchQuery + " " + p.quantity;
-    }
+    if (p.quantity) searchQuery = searchQuery + " " + p.quantity;
 
-    // Google-søk knapp
-    document.getElementById("food-google-btn").onclick = () => showSearchResult(searchQuery);
+    // Vis søkeord
+    document.getElementById("food-search-query").textContent = searchQuery;
 
-    // Prøv å hente næringstabell for alle produkter med navn
-    const nutritionCard = document.getElementById("nutrition-card");
-    nutritionCard.classList.add("hidden");
-    if (p.name) {
-      fetchNutritionData(p.name, p.brand, p.category);
-    }
+    // Last Google-iframe ETTER at siden er vist (unngår heng)
+    document.getElementById("food-google-iframe").src = "";
+    setTimeout(() => {
+      document.getElementById("food-google-iframe").src =
+        "https://www.google.com/search?q=" + enc(searchQuery) + "&igu=1";
+    }, 800);
+
+    // Næringstabell
+    document.getElementById("nutrition-card").classList.add("hidden");
+    if (p.name) fetchNutritionData(p.name, p.brand, p.category);
   }
 
   async function fetchNutritionData(name, brand, category) {
