@@ -247,22 +247,12 @@
 <body>
 
   <header>
-    <div class="logo-box">
-      <svg width="22" height="18" viewBox="0 0 22 18" fill="none">
-        <rect x="0" y="0" width="2" height="18" fill="#000"/>
-        <rect x="3" y="0" width="1" height="18" fill="#000"/>
-        <rect x="5" y="0" width="2" height="18" fill="#000"/>
-        <rect x="8" y="0" width="1" height="18" fill="#000"/>
-        <rect x="10" y="0" width="3" height="18" fill="#000"/>
-        <rect x="14" y="0" width="1" height="18" fill="#000"/>
-        <rect x="16" y="0" width="2" height="18" fill="#000"/>
-        <rect x="19" y="0" width="1" height="18" fill="#000"/>
-        <rect x="21" y="0" width="1" height="18" fill="#000"/>
-      </svg>
+    <div style="width:44px;height:44px;background:var(--accent);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+      <span style="font-family:'Syne',sans-serif;font-weight:800;font-size:28px;color:#000;line-height:1;">F</span>
     </div>
     <div>
-      <div class="logo-text">FORBRUKER.APP</div>
-      <div class="logo-sub">SKANN → SAMMENLIGN → SPAR</div>
+      <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:17px;letter-spacing:-.4px;">Forbruker.app</div>
+      <div style="font-size:9px;color:var(--muted);letter-spacing:2px;margin-top:1px;">Skann → Sammenlign → Spar</div>
     </div>
   </header>
 
@@ -304,7 +294,7 @@
             <path d="M8 5 L9.5 2 H14.5 L16 5" stroke="#000" stroke-width="2" fill="none" stroke-linejoin="round"/>
             <circle cx="19" cy="8" r="1" fill="#000"/>
           </svg>
-          START SKANNER
+          Start skanner
         </button>
       </div>
 
@@ -321,7 +311,7 @@
       </div>
 
       <div style="text-align:center;font-size:10px;color:var(--muted);letter-spacing:1px;margin-top:8px;">
-        INGEN ANNONSØRER · INGEN PERSONDATA · GRATIS
+        Ingen annonsører · Ingen persondata · Gratis
       </div>
     </div>
 
@@ -441,11 +431,15 @@
     <div id="view-food-result" class="hidden fade-up">
       <div class="card" style="position:relative;overflow:hidden;">
         <div id="food-accent-bar" class="accent-bar" style="background:var(--accent2)"></div>
+        <!-- Produktbilde fra OFF -->
+        <div id="food-image-wrap" class="hidden" style="margin-bottom:14px;border-radius:10px;overflow:hidden;background:var(--surface2);text-align:center;">
+          <img id="food-image" src="" alt="" style="max-height:180px;max-width:100%;object-fit:contain;display:block;margin:0 auto;" />
+        </div>
         <div class="result-header">
           <div class="result-emoji" id="food-emoji">🥗</div>
           <div style="flex:1;min-width:0;">
-            <div class="result-name" id="food-name">—</div>
-            <div class="result-brand hidden" id="food-brand"></div>
+            <div class="result-name" id="food-name" style="font-size:18px;">—</div>
+            <div class="result-brand hidden" id="food-brand" style="font-size:13px;"></div>
             <div id="food-tags"></div>
           </div>
         </div>
@@ -454,6 +448,9 @@
         <div class="result-meta">
           <div style="color:var(--muted);">EAN: <span style="color:var(--text);" id="food-ean">—</span></div>
           <div id="food-confidence"></div>
+        </div>
+        <div id="food-off-source" class="hidden" style="margin-top:10px;font-size:10px;color:var(--muted);padding-top:10px;border-top:1px solid var(--border);">
+          Kilde: <a href="https://world.openfoodfacts.org" target="_blank" style="color:var(--accent2);text-decoration:none;">Open Food Facts</a> — fri lisens (CC BY-SA)
         </div>
       </div>
 
@@ -465,9 +462,13 @@
       </div>
 
       <div class="card card-sm">
-        <div class="section-label">SØK PÅ PRIS</div>
-        <button class="btn btn-green" style="animation:none;" id="food-google-btn" onclick="">🔍 SØK PÅ GOOGLE</button>
-        <button class="btn btn-secondary" style="margin-top:8px;" onclick="resetAndScan()">← SKANN NYTT PRODUKT</button>
+        <div class="section-label" style="font-size:11px;">Priser på nett</div>
+        <div id="food-search-query" style="font-size:12px;color:var(--accent3);margin-bottom:10px;word-break:break-all;"></div>
+        <iframe id="food-google-iframe"
+          style="width:100%;height:60vh;border:none;border-radius:10px;background:#fff;"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-top-navigation-by-user-activation">
+        </iframe>
+        <button class="btn btn-secondary" style="margin-top:10px;" onclick="resetAndScan()">← Skann nytt produkt</button>
       </div>
     </div>
 
@@ -681,7 +682,7 @@
     if (!product || !product.name) {
       document.getElementById("loading-step").textContent = "Sjekker Open Food Facts…";
       try {
-        const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${barcode}?fields=product_name,brands,categories_tags,nutriscore_grade,ecoscore_grade,quantity`);
+        const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${barcode}?fields=product_name,brands,categories_tags,nutriscore_grade,ecoscore_grade,quantity,image_front_small_url`);
         const d = await r.json();
         if (d.status === 1 && d.product?.product_name) {
           const p = d.product;
@@ -691,10 +692,16 @@
             category: cat, emoji: categoryEmoji(p.categories_tags||[]),
             searchQuery: [p.brands, p.product_name].filter(Boolean).join(" "),
             description: null, confidence: "high",
+            quantity: p.quantity || null,
+            image_url: p.image_front_small_url || null,
+            _source: "openfoodfacts",
             badges: [
-              p.nutriscore_grade ? { label:"Nutri-score "+p.nutriscore_grade.toUpperCase() } : null,
-              p.ecoscore_grade   ? { label:"Eco-score "+p.ecoscore_grade.toUpperCase()     } : null,
-              p.quantity         ? { label: p.quantity                                      } : null,
+              p.nutriscore_grade && p.nutriscore_grade !== "unknown"
+                ? { label:"Nutri-score "+p.nutriscore_grade.toUpperCase() } : null,
+              p.ecoscore_grade && p.ecoscore_grade !== "unknown"
+                ? { label:"Eco-score "+p.ecoscore_grade.toUpperCase()     } : null,
+              p.quantity
+                ? { label: p.quantity } : null,
             ].filter(Boolean),
           };
         }
